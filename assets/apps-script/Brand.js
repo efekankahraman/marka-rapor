@@ -1,0 +1,71 @@
+/**
+ * Brand.js — markaya özel TÜM ayarlar bu dosyada.
+ * Kurulumda sadece bu dosya doldurulur; kodun geri kalanına dokunulmaz.
+ * Bu dosya Google Ads script'ine ve GA4 köprü script'ine de (build ile) gömülür.
+ *
+ * Kurulumdan sonra çoğu ayar Config dosyasından (Accounts / Settings sekmeleri) değiştirilebilir.
+ * Buradaki değerler sadece İLK kurulumda Config'e yazılır.
+ */
+var BRAND = {
+  // Rapor adı: sekme başlığı, ekrandaki başlık, giriş kodu maili ve Drive dosya adlarında görünür
+  REPORT_NAME: 'Marka Rapor',
+
+  // Ajans: bu alan adındaki Google hesapları rapora direkt girer (misafir koduna gerek yok)
+  AGENCY_DOMAIN: 'semtr.com',
+  // Durum sekmesini ve yönetim düğmelerini görebilen hesaplar (kurulumu yapan hesap otomatik eklenir)
+  ADMIN_EMAILS: [],
+  // Misafir (marka ekibi) e-postaları: rapora mail kodu ile girer. Sonra Config > Settings > GUEST_EMAILS'ten yönetilir
+  GUEST_EMAILS: [],
+  // Giriş kodu mailinin gönderen adı
+  OTP_SENDER_NAME: 'SEM - Rapor - Güvenlik Sistemi',
+
+  // Verinin başladığı tarih (backfill bu tarihe kadar geriye gider)
+  START_DATE: '2025-01-01',
+  // Ad group seviyesinde GA4 / Adjust verisinin başladığı tarih (daha kısa tutmak çekimi hızlandırır)
+  AG_START_DATE: '2026-01-01',
+  // Saat dilimi ve günlük yenileme saati
+  TIMEZONE: 'Europe/Istanbul',
+  REFRESH_HOUR: 3,
+
+  // Pazarlar (ülke kodu → Türkçe ad / İngilizce ad). Tek pazarlı markada tek satır yeterli.
+  // İngilizce ad GA4 / Adjust'taki ülke adıyla eşleştirmede kullanılır.
+  MARKETS: {
+    TR: { tr: 'Türkiye', en: 'Turkey' }
+  },
+  // Adjust / GA4'te hariç tutulacak ülkeler (ör. yurtdışı raporunda TR). Kod + GA4'teki ülke adları
+  EXCLUDE_MARKET_CODES: [],
+  EXCLUDE_MARKET_NAMES: [],
+
+  // Kampanya grubu filtresi: kampanya adında KEYWORD geçenler bir grup, geçmeyenler diğer grup.
+  // Kullanılmayacaksa null yapın.  DEFAULT: 'in' = raporda varsayılan olarak sadece KEYWORD geçenler, 'out' = geçmeyenler, '' = hepsi
+  CAMPAIGN_GROUP: null,
+  // Örnek: { KEYWORD: 'ecom', IN_LABEL: 'E-com (performans)', OUT_LABEL: 'Kurumsal', DEFAULT: 'in' },
+
+  // Reklam hesapları: [Platform, Ülke kodu, Hesap adı, Hesap ID, Tip, Not]
+  //   Platform: 'Google Ads' (ID: 123-456-7890) ya da 'Meta' (ID: act_ olmadan rakamlar)
+  //   Tip: 'Performans' | 'Branding' | 'Performans + Branding' (raporda filtre/kırılım olarak görünür)
+  ACCOUNTS: [
+    // ['Google Ads', 'TR', 'Marka - Search', '123-456-7890', 'Performans', ''],
+    // ['Meta', 'TR', 'Marka Meta', '1234567890123456', 'Performans', '']
+  ],
+
+  // GA4 property'leri: [Property ID, Ülke kodu, Ad]. Boş bırakılabilir.
+  GA4_PROPERTIES: [],
+  // Tüm pazarlar tek GA4 property'sindeyse (ya da tek pazar + tek property) onun ID'si.
+  // Doluysa bu property ülke kırılımıyla çekilir ve ad group seviyesinde GA4 verisi açılır.
+  GA4_GLOBAL_PROPERTY: '',
+  // GA4 yetkisi başka bir Google hesabındaysa köprü script'i kullanılır: property adında aranacak kelime (regex, ör. 'marka|brand')
+  GA4_PROPERTY_MATCH: '',
+  // GA4'ten sadece web verisi çekilsin mi? ('web' = evet; app verisi Adjust'tan geliyorsa önerilir. '' = tüm platformlar)
+  GA4_PLATFORM: 'web',
+
+  // Adjust (yoksa boş bırakın): hesap ID (X-Account-ID) ve app token'ları (virgülle)
+  ADJUST_ACCOUNT_ID: '',
+  ADJUST_APP_TOKENS: '',
+
+  // USD çevrimi için kurlar (hesap para birimleri otomatik eklenir)
+  FX_CURRENCIES: 'EUR,TRY',
+
+  // Misafir web uygulamasının deployment ID'si (kurulumda clasp create-deployment ile oluşur, skill doldurur)
+  GUEST_DEPLOYMENT_ID: ''
+};

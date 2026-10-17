@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title><?= APP_NAME ?></title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root { --navy: #000E24; --cyan: #06AEEF; --line: #d9e2ec; --muted: #6b7a8f; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--navy); color: #fff; font: 14px/1.5 Poppins, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .card { width: 100%; max-width: 400px; background: #fff; color: var(--navy); border-radius: 14px; padding: 28px 28px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.35); border-top: 4px solid var(--cyan); }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+    .brand svg { height: 22px; width: auto; }
+    .brand .sep { width: 1px; height: 22px; background: var(--line); }
+    .brand b { font-weight: 600; font-size: 16px; }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+    p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+    label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 6px; }
+    input { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--navy); }
+    input:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(6,174,239,.18); }
+    input.code { font-size: 22px; letter-spacing: 8px; text-align: center; }
+    button, a.btn { display: block; width: 100%; margin-top: 14px; padding: 11px 12px; border: 0; border-radius: 8px; background: var(--cyan); color: var(--navy); font: inherit; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; }
+    button:disabled { opacity: .6; cursor: default; }
+    .link { background: none; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 10px; text-decoration: underline; }
+    .msg { margin-top: 12px; font-size: 12px; min-height: 18px; }
+    .msg.err { color: #c62828; } .msg.ok { color: #2e7d32; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <svg aria-label="SEM" xmlns="http://www.w3.org/2000/svg" width="87" height="31" viewBox="0 0 87 31" fill="none"><path d="M3.46743 21.1413C5.56063 23.321 8.80964 25.1457 12.9005 25.1457C16.3725 25.1457 18.0652 23.4984 18.0652 21.8057C18.0652 19.5805 15.4851 18.8251 12.0586 18.0243C7.20788 16.9094 0.978344 15.5761 0.978344 8.94615C0.978344 4.00438 5.2512 0 12.2361 0C16.9549 0 20.8683 1.42429 23.8079 4.14089L20.2904 8.76868C17.8878 6.54352 14.6842 5.51967 11.7902 5.51967C8.8961 5.51967 7.43086 6.76649 7.43086 8.54571C7.43086 10.5479 9.92449 11.1713 13.351 11.9722C18.2472 13.0825 24.4768 14.5523 24.4768 21.1413C24.4768 26.57 20.6044 30.6654 12.5956 30.6654C6.89845 30.6654 2.80307 28.7496 0 25.9466L3.47198 21.1413H3.46743Z" fill="#06AEEF"></path><path d="M28.7451 30.1288V0.446289H49.7499V5.87495H35.0611V12.3275H49.4359V17.7561H35.0611V24.6546H49.7499V30.1288H28.7451Z" fill="#06AEEF"></path><path d="M80.5021 30.1288V8.76903L72.1339 30.1288H69.3763L61.008 8.76903V30.1288H54.6875V0.446289H63.5426L70.7505 18.9574L77.963 0.446289H86.8636V30.1288H80.4975H80.5021Z" fill="#06AEEF"></path></svg>
+      <span class="sep"></span><b><?= APP_NAME ?></b>
+    </div>
+
+    <div id="resume" class="hidden">
+      <h1>Tekrar hoş geldiniz</h1>
+      <p id="resumeTxt"></p>
+      <a class="btn" id="resumeLink" href="#">Rapora devam et</a>
+      <button class="link" id="other">Başka bir e-postayla giriş yap</button>
+    </div>
+
+    <div id="step1">
+      <h1>Rapora giriş</h1>
+      <p>E-posta adresinizi yazın; adresiniz yetkiliyse 6 haneli bir giriş kodu göndereceğiz.</p>
+      <label for="em">E-posta</label>
+      <input id="em" type="email" autocomplete="email" placeholder="ornek@sirket.com">
+      <button id="send">Kod gönder</button>
+    </div>
+
+    <div id="step2" class="hidden">
+      <h1>Kodu girin</h1>
+      <p id="sentTo"></p>
+      <label for="code">Giriş kodu</label>
+      <input id="code" class="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••">
+      <button id="verify">Giriş yap</button>
+      <button class="link" id="back">E-postayı değiştir / yeniden kod iste</button>
+    </div>
+
+    <div id="step3" class="hidden">
+      <h1>Giriş başarılı</h1>
+      <p>Oturumunuz bu tarayıcıda 30 gün açık kalacak.</p>
+      <a class="btn" id="goLink" href="#">Raporu aç</a>
+    </div>
+
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <script>
+    var BASE = <?!= JSON.stringify(baseUrl) ?>, BAD = <?!= JSON.stringify(badToken) ?>;
+    var $ = function (id) { return document.getElementById(id); };
+    function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+    function show(id) { ['resume', 'step1', 'step2', 'step3'].forEach(function (x) { $(x).classList.toggle('hidden', x !== id); }); }
+    function msg(t, cls) { var m = $('msg'); m.textContent = t || ''; m.className = 'msg' + (cls ? ' ' + cls : ''); }
+    function link(token) { return BASE + '?k=' + encodeURIComponent(token); }
+    function run(fn, arg, done) {
+      google.script.run.withSuccessHandler(function (s) {
+        var o; try { o = JSON.parse(s); } catch (e) { return done('Yanıt okunamadı'); }
+        o.ok ? done(null, o.data) : done(o.error);
+      }).withFailureHandler(function (e) { done(e && e.message || 'Bağlantı hatası'); })[fn](arg);
+    }
+    if (BAD) { ls('rpr_sess', null); msg('Oturumunuzun süresi dolmuş ya da erişiminiz kaldırılmış. Lütfen tekrar giriş yapın.', 'err'); }
+    var saved = ls('rpr_sess'), savedEm = ls('rpr_em');
+    if (saved && !BAD) { $('resumeTxt').textContent = (savedEm || '') + ' olarak giriş yapmıştınız.'; $('resumeLink').href = link(saved); show('resume'); }
+    if (savedEm) $('em').value = savedEm;
+    $('other').onclick = function () { ls('rpr_sess', null); show('step1'); };
+    $('send').onclick = function () {
+      var em = $('em').value.trim().toLowerCase(); if (!em) return msg('E-posta adresinizi yazın.', 'err');
+      $('send').disabled = true; msg('Gönderiliyor…');
+      run('apiGuestStart', em, function (err, data) {
+        $('send').disabled = false;
+        if (err) return msg(err, 'err');
+        ls('rpr_em', em); $('sentTo').textContent = em + ' — ' + data; msg(''); show('step2'); $('code').focus();
+      });
+    };
+    $('em').onkeydown = function (e) { if (e.key === 'Enter') $('send').click(); };
+    $('code').onkeydown = function (e) { if (e.key === 'Enter') $('verify').click(); };
+    $('back').onclick = function () { msg(''); show('step1'); };
+    $('verify').onclick = function () {
+      var code = $('code').value.trim(); if (code.length < 6) return msg('6 haneli kodu girin.', 'err');
+      $('verify').disabled = true; msg('Kontrol ediliyor…');
+      run('apiGuestVerify', JSON.stringify({ email: ls('rpr_em') || $('em').value, code: code }), function (err, token) {
+        $('verify').disabled = false;
+        if (err) return msg(err, 'err');
+        ls('rpr_sess', token); $('goLink').href = link(token); msg(''); show('step3');
+      });
+    };
+  </script>
+</body>
+</html>

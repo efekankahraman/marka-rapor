@@ -1,0 +1,1135 @@
+<script>
+(function () {
+  'use strict';
+
+  /* ================= yardımcılar ================= */
+  var $ = function (id) { return document.getElementById(id); };
+  var NF0 = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 });
+  var NF2 = new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var NFC = new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 });
+  var CUR_SYM = { USD: '$', EUR: '€', TRY: '₺', GBP: '£' };
+  function bad(v) { return v == null || v === '' || (typeof v === 'number' && !isFinite(v)); }
+  function fmt(v, u) {
+    if (bad(v)) return '–';
+    if (typeof v !== 'number') return esc(v);
+    switch (u) {
+      case 'usd': return '$' + NF2.format(v);
+      case 'money': return NF2.format(v);
+      case 'int': return NF0.format(v);
+      case 'num': return Math.abs(v) >= 100 ? NF0.format(v) : NF2.format(v);
+      case 'pct': return NF2.format(v * 100) + '%';
+      case 'x': return NF2.format(v);
+      default: return NF2.format(v);
+    }
+  }
+  function fmtCur(v, cur) {
+    if (bad(v)) return '–';
+    var c = String(cur || '').toUpperCase(), sym = CUR_SYM[c];
+    return sym ? sym + NF2.format(v) : (c ? c + ' ' : '') + NF2.format(v);
+  }
+  function fmtShort(v, u) {
+    if (bad(v)) return '';
+    if (u === 'pct') return NF2.format(v * 100) + '%';
+    if (u === 'x') return NF2.format(v);
+    return (u === 'usd' ? '$' : '') + NFC.format(v);
+  }
+  /** Kart için kısa biçim: büyük tutarlarda ondalık atılır, milyonlar "Mn" ile gösterilir (tam değer ipucunda). */
+  function kpiFmt(v, u) {
+    if (bad(v) || typeof v !== 'number') return fmt(v, u);
+    var a = Math.abs(v);
+    if (u === 'usd' || u === 'money') {
+      var pre = u === 'usd' ? '$' : '';
+      if (a >= 1e6) return pre + NF2.format(v / 1e6) + ' Mn';
+      if (a >= 1e4) return pre + NF0.format(v);
+      return pre + NF2.format(v);
+    }
+    if (u === 'int' || u === 'num') return a >= 1e7 ? NF2.format(v / 1e6) + ' Mn' : NF0.format(v);
+    return fmt(v, u);
+  }
+  /** Hâlâ sığmayan değerlerde yazıyı karta sığana kadar küçült. */
+  function fitKpis(el) {
+    el.querySelectorAll('.kpi .v').forEach(function (d) {
+      var fs = 20;
+      d.style.fontSize = '';
+      while (d.scrollWidth > d.clientWidth && fs > 13) { fs -= 1; d.style.fontSize = fs + 'px'; }
+    });
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function addDays(s, n) { var d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  /* ---------- yükleniyor göstergesi: önce ekranın ortasında, ~1.2 sn sonra sağ alta ---------- */
+  var busyN = 0, busyT = null;
+  function busy(on, txt) {
+    busyN += on ? 1 : -1; if (busyN < 0) busyN = 0;
+    var el = $('busy');
+    if (txt) $('busyTxt').textContent = txt;
+    if (busyN > 0 && el.classList.contains('hidden')) {
+      el.classList.remove('hidden', 'corner'); el.classList.add('center');
+      clearTimeout(busyT);
+      busyT = setTimeout(function () { el.classList.remove('center'); el.classList.add('corner'); }, 1200);
+    }
+    if (busyN === 0) { clearTimeout(busyT); el.classList.add('hidden'); el.classList.remove('center', 'corner'); }
+  }
+  var toastT;
+  function toast(html, ms) {
+    var t = $('toast'); t.innerHTML = html; t.classList.remove('hidden');
+    clearTimeout(toastT); toastT = setTimeout(function () { t.classList.add('hidden'); }, ms || 5000);
+  }
+  var GUEST_KEY = (function () { try { return new URLSearchParams(location.search).get('k') || ''; } catch (e) { return ''; } })() || (window.__GK || '');
+  function call(fn, arg, txt, quiet) {
+    if (!quiet) busy(true, txt || 'Veriler yükleniyor…');
+    return new Promise(function (res, rej) {
+      var r = google.script.run
+        .withSuccessHandler(function (s) {
+          if (!quiet) busy(false);
+          var o; try { o = JSON.parse(s); } catch (e) { return rej(new Error('Yanıt okunamadı')); }
+          o.ok ? res(o.data) : rej(new Error(o.error));
+        })
+        .withFailureHandler(function (e) { if (!quiet) busy(false); rej(e); });
+      r[fn](arg === undefined ? null : arg, GUEST_KEY || window.__GK || '');
+    });
+  }
+  function fail(e) { toast('⚠ ' + esc(e.message || e), 9000); }
+
+  /* ================= durum ================= */
+  var B = null;
+  var S = {
+    tab: 'ads', from: '', to: '',
+    f: { platforms: [], countries: [], accounts: [], kinds: ['ecom'], campInc: { terms: [], mode: 'or' }, campExc: { terms: [], mode: 'or' } },
+    ads: { level: 'country', grain: 'none', drill: [], pick: null, mf: [], view: null, res: null, sort: null, page: 0, ids: false, sel: {}, lastSel: null,
+      groups: { ga4: false, adj: false } },
+    trend: { grain: 'week', metrics: ['spend_usd'], brk: 'none', mode: 'multi', res: null }
+  };
+  var LEVEL_ORDER = ['total', 'country', 'platform', 'account', 'campaign', 'adgroup', 'ad'];
+  var LEVEL_LABELS = { total: 'Toplam', country: 'Ülke', platform: 'Platform', account: 'Hesap', campaign: 'Kampanya', adgroup: 'Ad group / Ad set', ad: 'Ad' };
+  var GRAINS = [['none', 'Dönemsiz'], ['day', 'Günlük'], ['week', 'Haftalık'], ['month', 'Aylık']];
+  var GROUPS = [['ga4', 'GA4 Web'], ['adj', 'Adjust']];
+  var SERIES = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
+  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+  function div(a, b) { return b ? a / b : null; }
+  function sum(a, b) { return (a || 0) + (b || 0); }
+  var DERIVED = {
+    roas: function (m) { return div(sum(m.ga_revenue_usd, m.adj_revenue_usd), m.spend_usd); },
+    cohort_roas: function (m) { return div(sum(m.ga_revenue_usd, m.adj_c_revenue_usd), m.spend_usd); },
+    coh_purchases: function (m) { return sum(m.ga_purchases, m.adj_c_purchases); },
+    coh_revenue_usd: function (m) { return sum(m.ga_revenue_usd, m.adj_c_revenue_usd); },
+    cpi: function (m) { return div(m.spend_usd, m.adj_installs); },
+    cps: function (m) { return div(m.spend_usd, sum(m.ga_sessions, m.adj_sessions)); },
+    cpc: function (m) { return div(m.spend_usd, m.clicks); },
+    ctr: function (m) { return div(m.clicks, m.impressions); },
+    cost_per_install: function (m) { return div(m.spend_usd, m.installs); },
+    tot_sessions: function (m) { return sum(m.ga_sessions, m.adj_sessions); },
+    tot_purchases: function (m) { return sum(m.ga_purchases, m.adj_purchases); },
+    tot_revenue_usd: function (m) { return sum(m.ga_revenue_usd, m.adj_revenue_usd); },
+    tot_installs: function (m) { return m.adj_installs || 0; }
+  };
+
+  /* ================= istemci önbelleği + arka planda ön yükleme ================= */
+  var QC = {};            // params-json → sonuç
+  var inflight = {};      // params-json → Promise
+  function qkey(p) { return JSON.stringify(p); }
+  function fetchQuery(p, quiet) {
+    var k = qkey(p);
+    if (QC[k]) return Promise.resolve(QC[k]);
+    if (inflight[k]) {
+      if (!quiet) { busy(true); return inflight[k].then(function (r) { busy(false); return r; }, function (e) { busy(false); throw e; }); }
+      return inflight[k];
+    }
+    var pr = call('apiQuery', k, 'Veriler yükleniyor…', quiet).then(function (res) { QC[k] = res; delete inflight[k]; return res; },
+      function (e) { delete inflight[k]; throw e; });
+    inflight[k] = pr;
+    return pr;
+  }
+  /** Tam eşleşen sonuç yoksa: aynı seviyenin filtresiz (detaysız) sonucundan satır süzerek anında üret. */
+  function deriveFromBase(baseP, preds) {
+    var base = QC[qkey(baseP)];
+    if (!base) return null;
+    var idx = {}; base.columns.forEach(function (c, i) { idx[c.k] = i; });
+    if (!preds.every(function (pr) { return idx[pr.col] != null; })) return null;
+    var rows = base.rows.filter(function (r) { return preds.every(function (pr) { return String(r[idx[pr.col]]) === String(pr.v); }); });
+    var out = {}; for (var k in base) out[k] = base[k];
+    out.rows = rows;
+    out.totals = totalsFor(base, rows, true);
+    out.unmatched = [];
+    return out;
+  }
+  /** Satır alt kümesi için toplam satırı (toplanabilirler toplanır, türetilmişler yeniden hesaplanır). */
+  function totalsFor(res, rows, metricOnly) {
+    if (!res.totals) return null;
+    var off = res.columns.length - res.totals.length;
+    var m = {}, curIdx = -1;
+    res.columns.forEach(function (c, i) {
+      if (c.k === '_cur') curIdx = i;
+      if (c.t === 'text' || c.t === 'hidden' || c.d) return;
+      m[c.k] = rows.reduce(function (a, r) { return a + (+r[i] || 0); }, 0);
+    });
+    var curs = {};
+    if (curIdx >= 0) rows.forEach(function (r) { curs[r[curIdx]] = 1; });
+    var one = Object.keys(curs).length === 1 ? Object.keys(curs)[0] : '';
+    var t = res.columns.map(function (c) {
+      if (c.k === '_cur') return one;
+      if (c.t === 'text') return '';
+      if (c.orig && !one) return null;
+      return c.d ? (DERIVED[c.k] ? DERIVED[c.k](m) : null) : m[c.k];
+    });
+    return metricOnly ? t.slice(off) : t;
+  }
+
+  function baseParams(level, grain) {
+    return { source: 'ads', from: S.from, to: S.to, level: level, grain: grain,
+      filters: { platforms: S.f.platforms.slice(), countries: S.f.countries.slice(), accounts: S.f.accounts.slice(), kinds: S.f.kinds.slice(), campInc: termsRegex(S.f.campInc, false), campExc: termsRegex(S.f.campExc, true), eq: {},
+        pick: S.ads.pick ? { fields: S.ads.pick.fields, keys: S.ads.pick.keys } : null } };
+  }
+  function drillPreds() {
+    var pr = [];
+    S.ads.drill.forEach(function (d) {
+      if (d.country) pr.push({ col: 'country', v: d.country });
+      if (d.platform) pr.push({ col: 'platform', v: d.platform });
+      if (d.field) pr.push({ col: d.field, v: d.value });
+    });
+    return pr;
+  }
+  function drillParams(level, grain) {
+    var p = baseParams(level, grain);
+    S.ads.drill.forEach(function (d) {
+      if (d.platform) p.filters.platforms = [d.platform];
+      if (d.country) p.filters.countries = [d.country];
+      if (d.field) p.filters.eq[d.field] = d.value;
+    });
+    return p;
+  }
+  function daysSel() { return Math.round((Date.parse(S.to) - Date.parse(S.from)) / 864e5) + 1; }
+
+  var prefetchQ = [], prefetching = false;
+  function schedulePrefetch() {
+    var g = S.ads.grain;
+    var lv = ['campaign', 'country', 'platform', 'account', 'total'];
+    if (daysSel() <= B.adMaxDays) lv.push('adgroup');
+    prefetchQ = lv.map(function (l) { return baseParams(l, g); });
+    // trend kırılımları (açıksa)
+    if ($('trendBox').open) ['total', 'country', 'platform'].forEach(function (l) { prefetchQ.push(baseParams(l, S.trend.grain)); });
+    runPrefetch();
+  }
+  function runPrefetch() {
+    if (prefetching) return;
+    var p = prefetchQ.shift();
+    if (!p) return;
+    if (QC[qkey(p)]) return runPrefetch();
+    prefetching = true;
+    fetchQuery(p, true).then(function () { prefetching = false; setTimeout(runPrefetch, 50); },
+      function () { prefetching = false; setTimeout(runPrefetch, 50); });
+  }
+
+  /* ================= kontroller ================= */
+  function seg(el, items, cur, onPick) {
+    el.innerHTML = items.map(function (it) {
+      return '<button data-v="' + it[0] + '"' + (it[0] === cur ? ' class="on"' : '') + '>' + it[1] + '</button>';
+    }).join('');
+    el.onclick = function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      Array.prototype.forEach.call(el.children, function (x) { x.classList.toggle('on', x === b); });
+      onPick(b.getAttribute('data-v'));
+    };
+  }
+  function multi(el, items, selected, onChange, search) {
+    var sel = {}; selected.forEach(function (k) { sel[k] = 1; });
+    function summary() {
+      var keys = Object.keys(sel);
+      if (!keys.length) return 'Tümü';
+      if (keys.length === 1) { var it = items.filter(function (i) { return i.k === keys[0]; })[0]; return it ? it.l : keys[0]; }
+      return keys.length + ' seçili';
+    }
+    el.innerHTML = '<details class="ms"><summary></summary><div class="dd"><div class="ms-actions"><button data-a="none">Temizle</button></div>' +
+      (search ? '<input type="text" class="ms-search" placeholder="Ara…">' : '') +
+      '<div class="ms-list">' + items.map(function (i) {
+        return '<label data-t="' + esc((i.l + ' ' + (i.s || '')).toLowerCase()) + '"><input type="checkbox" value="' + esc(i.k) + '"' + (sel[i.k] ? ' checked' : '') + '> ' + esc(i.l) + (i.s ? ' <span class="muted small">' + esc(i.s) + '</span>' : '') + '</label>';
+      }).join('') + '</div></div></details>';
+    var sm = el.querySelector('summary'); sm.textContent = summary();
+    el.querySelector('.ms-list').onchange = function (e) {
+      if (e.target.checked) sel[e.target.value] = 1; else delete sel[e.target.value];
+      sm.textContent = summary(); onChange(Object.keys(sel));
+    };
+    el.querySelector('.ms-actions').onclick = function (e) {
+      if (!e.target.getAttribute('data-a')) return;
+      e.preventDefault(); sel = {};
+      el.querySelectorAll('.ms-list input').forEach(function (c) { c.checked = false; });
+      sm.textContent = summary(); onChange([]);
+    };
+    var s = el.querySelector('.ms-search');
+    if (s) s.oninput = function () {
+      var q = s.value.toLowerCase();
+      el.querySelectorAll('.ms-list label').forEach(function (l) { l.style.display = l.getAttribute('data-t').indexOf(q) >= 0 ? '' : 'none'; });
+    };
+  }
+  document.addEventListener('click', function (e) {
+    document.querySelectorAll('details.ms[open]').forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute('open'); });
+  });
+
+  /* ================= birleşik filtre çubuğu (Meta / Google Ads tarzı) ================= */
+  var FDEFS = [
+    { k: 'countries', l: 'Ülke', type: 'multi', search: true, items: function () { return B.countries.map(function (c) { return { k: c.code, l: c.name, s: c.code }; }); } },
+    { k: 'platforms', l: 'Platform', type: 'multi', items: function () { return [{ k: 'Google Ads', l: 'Google Ads' }, { k: 'Meta', l: 'Meta' }]; } },
+    { k: 'accounts', l: 'Hesap', type: 'multi', search: true, items: function () {
+      return B.accounts.filter(function (a) {
+        return (!S.f.platforms.length || S.f.platforms.indexOf(a.platform) >= 0) && (!S.f.countries.length || S.f.countries.indexOf(a.code) >= 0);
+      }).map(function (a) { return { k: a.key, l: a.name, s: (a.platform === 'Meta' ? 'Meta' : 'GAds') + ' · ' + a.code }; });
+    } },
+    { k: 'kinds', l: 'Kampanya grubu', type: 'multi', items: function () { var g = B.campaignGroup || {}; return [{ k: 'ecom', l: g.inLabel || 'Grup', s: 'adında "' + (g.keyword || '') + '" geçen' }, { k: 'kurumsal', l: g.outLabel || 'Diğer', s: 'adında "' + (g.keyword || '') + '" geçmeyen' }]; } },
+    { k: 'campInc', l: 'Kampanya adı içerir', type: 'terms', ph: 'Kampanya adı ekle… (Enter)' },
+    { k: 'campExc', l: 'Kampanya adı içermez', type: 'terms', ph: 'Kampanya adı ekle… (Enter)' }
+  ];
+  function fdef(k) { return FDEFS.filter(function (d) { return d.k === k; })[0]; }
+  function fChipText(d) {
+    var v = S.f[d.k];
+    if (d.type === 'terms') return v.terms.join(v.mode === 'and' ? ' ve ' : ' ya da ');
+    var items = d.items(), names = v.map(function (k) { var it = items.filter(function (i) { return i.k === k; })[0]; return it ? it.l : k; });
+    return names.length <= 2 ? names.join(', ') : names.length + ' seçili';
+  }
+  function fActive(d) { var v = S.f[d.k]; return d.type === 'terms' ? v.terms.length > 0 : v.length > 0; }
+  function fEmpty(d) { return d.type === 'terms' ? { terms: [], mode: 'or' } : []; }
+  function reEsc(x) { return String(x).replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&'); }
+  /** Kampanya adı terimleri → sunucu regex'i. YA DA: a|b · VE: (?=.*a)(?=.*b). Hariç tutmada VE = hepsini içerenler hariç. */
+  function termsRegex(v, excl) {
+    var t = (v && v.terms || []).filter(String);
+    if (!t.length) return '';
+    if (t.length === 1 || v.mode !== 'and') return t.map(reEsc).join('|');
+    return '^' + t.map(function (x) { return '(?=.*' + reEsc(x) + ')'; }).join('');
+  }
+  function pruneAccounts() {
+    var ok = {}; fdef('accounts').items().forEach(function (i) { ok[i.k] = 1; });
+    S.f.accounts = S.f.accounts.filter(function (k) { return ok[k]; });
+  }
+  function drawFilterBar() {
+    var bar = $('fBar'); if (!bar) return;
+    var h = '';
+    if (S.ads.pick) h += '<span class="crumb pick" title="' + esc(S.ads.pick.title) + '">⧩ ' + esc(S.ads.pick.label) + '<button data-x="pick" title="Seçili satır filtresini kaldır">×</button></span>';
+    S.ads.drill.forEach(function (d, i) { h += '<span class="crumb">' + esc(d.label) + '<button data-x="drill" data-i="' + i + '" title="Kaldır">×</button></span>'; });
+    FDEFS.forEach(function (d) {
+      if (fActive(d)) h += '<span class="crumb fl" data-edit="' + d.k + '">' + esc(d.l) + ': <b>' + esc(fChipText(d)) + '</b><button data-x="f" data-k="' + d.k + '" title="Filtreyi kaldır">×</button></span>';
+    });
+    S.ads.mf.forEach(function (f, i) { h += '<span class="crumb mf" data-medit="' + i + '">' + esc(mfLabel(f)) + '<button data-x="mf" data-i="' + i + '" title="Filtreyi kaldır">×</button></span>'; });
+    var any = S.ads.pick || S.ads.drill.length || S.ads.mf.length || FDEFS.some(fActive);
+    h += '<input type="text" id="fQ" class="fq" placeholder="' + (any ? 'Filtre ekle…' : 'Filtrele: ülke, hesap, kampanya adı ya da metrik yazın (ör. roas > 3)') + '" autocomplete="off">' +
+      (any ? '<a href="#" id="fClear" class="small">tümünü temizle</a>' : '');
+    bar.innerHTML = h;
+    bar.querySelectorAll('[data-x]').forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var x = b.getAttribute('data-x');
+        if (x === 'pick') { S.ads.pick = null; loadAds(); }
+        else if (x === 'drill') { S.ads.drill = S.ads.drill.slice(0, +b.getAttribute('data-i')); loadAds(); }
+        else if (x === 'mf') { S.ads.mf.splice(+b.getAttribute('data-i'), 1); mfChanged(); }
+        else { var d = fdef(b.getAttribute('data-k')); S.f[d.k] = fEmpty(d); if (d.k !== 'accounts') pruneAccounts(); applyFilters(); }
+      };
+    });
+    bar.querySelectorAll('[data-edit]').forEach(function (c) { c.onclick = function (e) { e.stopPropagation(); fPopup(c.getAttribute('data-edit')); }; });
+    bar.querySelectorAll('[data-medit]').forEach(function (c) { c.onclick = function (e) { e.stopPropagation(); fPopup('mf', +c.getAttribute('data-medit')); }; });
+    fQInit();
+    if ($('fClear')) $('fClear').onclick = function (e) {
+      e.preventDefault();
+      FDEFS.forEach(function (d) { S.f[d.k] = fEmpty(d); });
+      S.ads.mf = []; S.ads.pick = null; S.ads.drill = [];
+      applyFilters();
+    };
+  }
+  function addTerm(k, t) {
+    if (!t) return;
+    var v = S.f[k];
+    if (v.terms.indexOf(t) < 0) v.terms.push(t);
+    applyFilters();
+  }
+  /* ----- yazarak filtreleme (Meta / Google Ads arama çubuğu gibi) ----- */
+  function trLower(x) { return String(x || '').toLocaleLowerCase('tr').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i'); }
+  var MF_PARSE = /^(.+?)\s*(>=|<=|=>|=<|>|<|=|≥|≤)\s*(-?[\d.,]+)\s*%?$/;
+  function fSuggest(q) {
+    var out = [], ql = trLower(q).trim();
+    var mcols = mfCols(S.ads.res);
+    // 1) metrik ifadesi: "roas > 3", "spend >= 1000", "ctr < 2"
+    var m = MF_PARSE.exec(q.trim());
+    if (m) {
+      var name = trLower(m[1]).trim(), opm = { '>': 'gt', '>=': 'gte', '=>': 'gte', '≥': 'gte', '<': 'lt', '<=': 'lte', '=<': 'lte', '≤': 'lte', '=': 'eq' }[m[2]];
+      var num = parseFloat(m[3].replace(/\./g, m[3].indexOf(',') >= 0 ? '' : '.').replace(',', '.'));
+      mcols.filter(function (c) { var l = trLower(c.l); return l === name || l.indexOf(name) === 0 || trLower(c.k).indexOf(name) === 0 || l.indexOf(name) >= 0; })
+        .slice(0, 4).forEach(function (c) {
+          var f = { k: c.k, op: opm, v: num, v2: NaN };
+          out.push({ g: 'Metrik filtresi', l: mfLabel(f), act: function () { S.ads.mf.push(f); mfChanged(); } });
+        });
+      if (out.length) return out;
+    }
+    if (!ql) {
+      FDEFS.forEach(function (d) { out.push({ g: 'Boyut', l: d.l, act: function () { fPopup(d.k); } }); });
+      mcols.forEach(function (c) { out.push({ g: 'Metrik', l: c.l, act: function () { fPopup('mf', null, c.k); } }); });
+      return out;
+    }
+    // 2) boyut değerleri (ülke, platform, tip, hesap) → tek tıkla eklenir
+    FDEFS.filter(function (d) { return d.type === 'multi'; }).forEach(function (d) {
+      d.items().forEach(function (it) {
+        if (S.f[d.k].indexOf(it.k) >= 0) return;
+        if (trLower(it.l + ' ' + (it.s || '') + ' ' + it.k).indexOf(ql) < 0) return;
+        out.push({ g: d.l, l: it.l, s: it.s, act: function () { S.f[d.k] = S.f[d.k].concat([it.k]); if (d.k !== 'accounts') pruneAccounts(); applyFilters(); } });
+      });
+    });
+    // 3) filtre türleri ve metrik adları
+    FDEFS.forEach(function (d) { if (trLower(d.l).indexOf(ql) >= 0) out.push({ g: 'Filtre', l: d.l + '…', act: function () { fPopup(d.k); } }); });
+    mcols.forEach(function (c) { if (trLower(c.l).indexOf(ql) >= 0 || trLower(c.k).indexOf(ql) >= 0) out.push({ g: 'Metrik', l: c.l + '…', act: function () { fPopup('mf', null, c.k); } }); });
+    // 4) serbest metin → kampanya adı içerir / içermez
+    out.push({ g: 'Kampanya adı', l: 'içerir: "' + q.trim() + '"' + (S.f.campInc.terms.length ? ' (' + (S.f.campInc.mode === 'and' ? 've' : 'ya da') + ' ile eklenir)' : ''), act: function () { addTerm('campInc', q.trim()); } });
+    out.push({ g: 'Kampanya adı', l: 'içermez: "' + q.trim() + '"', act: function () { addTerm('campExc', q.trim()); } });
+    return out.slice(0, 60);
+  }
+  function fQInit() {
+    var inp = $('fQ'); if (!inp) return;
+    var cur = [], hi = 0;
+    function render() {
+      var old = document.querySelector('.fpop'); if (old) old.remove();
+      cur = fSuggest(inp.value); hi = 0;
+      if (!cur.length) return;
+      var pop = document.createElement('div'); pop.className = 'fpop fsug';
+      pop.style.left = Math.max(0, inp.offsetLeft) + 'px';
+      var g = '', h = '<div class="fp-scroll">';
+      cur.forEach(function (o, i) {
+        if (o.g !== g) { g = o.g; h += '<div class="fp-h">' + esc(g) + '</div>'; }
+        h += '<button class="fp-item' + (i === 0 ? ' hi' : '') + '" data-i="' + i + '">' + esc(o.l) + (o.s ? ' <span class="muted small">' + esc(o.s) + '</span>' : '') + '</button>';
+      });
+      pop.innerHTML = h + '</div>';
+      $('fBar').appendChild(pop);
+      pop.onmousedown = function (e) { e.preventDefault(); };
+      pop.onclick = function (e) { e.stopPropagation(); var b = e.target.closest('[data-i]'); if (b) pick(+b.getAttribute('data-i')); };
+    }
+    function pick(i) { var o = cur[i]; if (!o) return; var p = document.querySelector('.fpop'); if (p) p.remove(); inp.value = ''; o.act(); }
+    function mark() { document.querySelectorAll('.fsug .fp-item').forEach(function (b, i) { b.classList.toggle('hi', i === hi); if (i === hi) b.scrollIntoView({ block: 'nearest' }); }); }
+    inp.onfocus = render;
+    inp.onclick = function (e) { e.stopPropagation(); };
+    inp.oninput = render;
+    inp.onkeydown = function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); hi = Math.min(cur.length - 1, hi + 1); mark(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); hi = Math.max(0, hi - 1); mark(); }
+      else if (e.key === 'Enter') { e.preventDefault(); pick(hi); }
+      else if (e.key === 'Escape') { var p = document.querySelector('.fpop'); if (p) p.remove(); inp.blur(); }
+      else if (e.key === 'Backspace' && !inp.value) {
+        // boş kutuda geri silme → son filtreyi kaldır (Meta/Google gibi)
+        if (S.ads.mf.length) { S.ads.mf.pop(); mfChanged(); return; }
+        for (var i = FDEFS.length - 1; i >= 0; i--) { var d = FDEFS[i]; if (fActive(d)) { if (d.type === 'terms') S.f[d.k].terms.pop(); else S.f[d.k] = []; applyFilters(); return; } }
+      }
+    };
+  }
+  /** Filtre penceresi: anahtar yoksa menü (boyutlar + metrikler); varsa o filtrenin düzenleyicisi. */
+  function fPopup(key, mfIdx) {
+    var old = document.querySelector('.fpop'); if (old) old.remove();
+    var pop = document.createElement('div'); pop.className = 'fpop';
+    $('fBar').appendChild(pop);
+    pop.onclick = function (e) { e.stopPropagation(); };
+    function close() { pop.remove(); }
+    if (!key) {
+      var mcols = mfCols(S.ads.res);
+      pop.innerHTML = '<div class="fp-scroll"><div class="fp-h">Boyut</div>' + FDEFS.map(function (d) { return '<button class="fp-item" data-k="' + d.k + '">' + esc(d.l) + '</button>'; }).join('') +
+        '<div class="fp-h">Metrik</div>' + mcols.map(function (c) { return '<button class="fp-item" data-m="' + c.k + '">' + esc(c.l) + (c.t === 'pct' ? ' (%)' : '') + '</button>'; }).join('') + '</div>';
+      pop.querySelectorAll('[data-k]').forEach(function (b) { b.onclick = function () { fPopup(b.getAttribute('data-k')); }; });
+      pop.querySelectorAll('[data-m]').forEach(function (b) { b.onclick = function () { fPopup('mf', null, b.getAttribute('data-m')); }; });
+      return;
+    }
+    if (key === 'mf') {
+      var f = mfIdx != null ? S.ads.mf[mfIdx] : { k: arguments[2], op: 'gt', v: '', v2: '' };
+      var cols = mfCols(S.ads.res);
+      pop.innerHTML = '<div class="fp-h">Metrik filtresi</div><div class="fp-row"><select id="mfK">' + cols.map(function (c) { return '<option value="' + c.k + '"' + (c.k === f.k ? ' selected' : '') + '>' + esc(c.l) + (c.t === 'pct' ? ' (%)' : '') + '</option>'; }).join('') + '</select>' +
+        '<select id="mfOp">' + MF_OPS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === f.op ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+        '<div class="fp-row"><input type="number" id="mfV" step="any" placeholder="değer" value="' + (f.v === '' ? '' : f.v) + '"><input type="number" id="mfV2" step="any" placeholder="ve"' + (f.op === 'between' ? '' : ' class="hidden"') + ' value="' + (isFinite(f.v2) ? f.v2 : '') + '"></div>' +
+        '<div class="fp-row end"><button id="fpCancel">Vazgeç</button><button class="primary" id="mfOk">Uygula</button></div>';
+      $('mfOp').onchange = function () { $('mfV2').classList.toggle('hidden', this.value !== 'between'); };
+      var ok = function () {
+        var v = parseFloat(String($('mfV').value).replace(',', '.')), v2 = parseFloat(String($('mfV2').value).replace(',', '.'));
+        if (!isFinite(v) || ($('mfOp').value === 'between' && !isFinite(v2))) { $('mfV').focus(); return; }
+        var nf = { k: $('mfK').value, op: $('mfOp').value, v: v, v2: v2 };
+        if (mfIdx != null) S.ads.mf[mfIdx] = nf; else S.ads.mf.push(nf);
+        close(); mfChanged();
+      };
+      $('mfOk').onclick = ok; $('fpCancel').onclick = close;
+      [$('mfV'), $('mfV2')].forEach(function (i) { i.onkeydown = function (e) { if (e.key === 'Enter') ok(); if (e.key === 'Escape') close(); }; });
+      $('mfV').focus();
+      return;
+    }
+    var d = fdef(key);
+    if (d.type === 'terms') {
+      var st = { terms: S.f[d.k].terms.slice(), mode: S.f[d.k].mode };
+      var draw = function () {
+        pop.innerHTML = '<div class="fp-h">' + esc(d.l) + '</div>' +
+          '<div class="seg small tmode"><button data-m="or"' + (st.mode !== 'and' ? ' class="on"' : '') + '>YA DA (herhangi biri)</button><button data-m="and"' + (st.mode === 'and' ? ' class="on"' : '') + '>VE (hepsi)</button></div>' +
+          '<div class="tlist">' + st.terms.map(function (t, i) {
+            return (i ? '<div class="tj">' + (st.mode === 'and' ? 've' : 'ya da') + '</div>' : '') + '<div class="trow"><span>' + esc(t) + '</span><button data-del="' + i + '" title="Kaldır">×</button></div>';
+          }).join('') + '</div>' +
+          '<div class="inp-x"><input type="text" id="fpT" placeholder="' + esc(d.ph) + '"><button type="button" class="x hidden" id="fpTx" title="Temizle">×</button></div>' +
+          '<div class="fp-row end"><button id="fpCancel">Vazgeç</button><button class="primary" id="fpOk">Uygula</button></div>';
+        pop.querySelectorAll('[data-m]').forEach(function (b) { b.onclick = function () { keep(); st.mode = b.getAttribute('data-m'); draw(); }; });
+        pop.querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { keep(); st.terms.splice(+b.getAttribute('data-del'), 1); draw(); }; });
+        var inp = $('fpT');
+        inp.oninput = function () { $('fpTx').classList.toggle('hidden', !inp.value); };
+        $('fpTx').onclick = function () { inp.value = ''; $('fpTx').classList.add('hidden'); inp.focus(); };
+        inp.onkeydown = function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); if (inp.value.trim()) { keep(); draw(); } else ok(); }
+          if (e.key === 'Escape') close();
+        };
+        $('fpOk').onclick = function () { keep(); ok(); };
+        $('fpCancel').onclick = close;
+        inp.focus();
+      };
+      var keep = function () { var i = $('fpT'); var v = i && i.value.trim(); if (v && st.terms.indexOf(v) < 0) st.terms.push(v); if (i) i.value = ''; };
+      var ok = function () { S.f[d.k] = st; close(); applyFilters(); };
+      draw();
+      return;
+    }
+    var items = d.items(), sel = {}; S.f[d.k].forEach(function (k) { sel[k] = 1; });
+    pop.innerHTML = '<div class="fp-h">' + esc(d.l) + '</div>' + (d.search ? '<input type="text" id="fpS" placeholder="Ara…">' : '') +
+      '<div class="fp-list">' + items.map(function (i) {
+        return '<label data-t="' + esc((i.l + ' ' + (i.s || '')).toLowerCase()) + '"><input type="checkbox" value="' + esc(i.k) + '"' + (sel[i.k] ? ' checked' : '') + '> ' + esc(i.l) + (i.s ? ' <span class="muted small">' + esc(i.s) + '</span>' : '') + '</label>';
+      }).join('') + '</div><div class="fp-row end"><button id="fpNone">Temizle</button><button id="fpCancel">Vazgeç</button><button class="primary" id="fpOk">Uygula</button></div>';
+    if ($('fpS')) { $('fpS').oninput = function () { var q = this.value.toLowerCase(); pop.querySelectorAll('.fp-list label').forEach(function (l) { l.style.display = l.getAttribute('data-t').indexOf(q) >= 0 ? '' : 'none'; }); }; $('fpS').focus(); }
+    $('fpNone').onclick = function () { pop.querySelectorAll('.fp-list input').forEach(function (c) { c.checked = false; }); };
+    $('fpCancel').onclick = close;
+    $('fpOk').onclick = function () {
+      S.f[d.k] = Array.prototype.filter.call(pop.querySelectorAll('.fp-list input'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+      if (d.k !== 'accounts') pruneAccounts();
+      close(); applyFilters();
+    };
+  }
+  window.addEventListener('resize', function () { var k = $('adsKpis'); if (k) fitKpis(k); });
+  document.addEventListener('click', function (e) {
+    var p = document.querySelector('.fpop'); if (p && !p.contains(e.target)) p.remove();
+  });
+  function preset(v) {
+    var t = B.dataEnd, y = t.slice(0, 4);
+    if (v === '7' || v === '30' || v === '90') { S.from = addDays(t, -(+v) + 1); S.to = t; }
+    else if (v === 'mtd') { S.from = t.slice(0, 8) + '01'; S.to = t; }
+    else if (v === 'lm') { var e = addDays(t.slice(0, 8) + '01', -1); S.from = e.slice(0, 8) + '01'; S.to = e; }
+    else if (v === 'ytd') { S.from = y + '-01-01'; S.to = t; }
+    else if (v === '2025') { S.from = '2025-01-01'; S.to = '2025-12-31'; }
+    else if (v === 'all') { S.from = B.startDate; S.to = t; }
+    $('fFrom').value = S.from; $('fTo').value = S.to;
+  }
+  function filterMeta() {
+    return { 'Tarih': S.from + ' – ' + S.to, 'Ülke': S.f.countries.join(', ') || 'Tümü', 'Platform': S.f.platforms.join(', ') || 'Tümü',
+      'Hesap': S.f.accounts.length ? S.f.accounts.length + ' hesap' : 'Tümü', 'Kampanya grubu': S.f.kinds.length === 1 ? (S.f.kinds[0] === 'ecom' ? (B.campaignGroup || {}).inLabel : (B.campaignGroup || {}).outLabel) : 'Tümü',
+      'Kampanya içerir': S.f.campInc.terms.join(S.f.campInc.mode === 'and' ? ' VE ' : ' YA DA ') || '-', 'Kampanya hariç': S.f.campExc.terms.join(S.f.campExc.mode === 'and' ? ' VE ' : ' YA DA ') || '-',
+      'Seviye': LEVEL_LABELS[S.ads.level], 'Detay': S.ads.drill.map(function (d) { return d.label; }).join(' › ') || '-',
+      'Seçili satır filtresi': S.ads.pick ? S.ads.pick.title : '-' };
+  }
+  function countryName(code) {
+    var c = B.countries.filter(function (x) { return x.code === code; })[0];
+    return c ? c.name : code;
+  }
+
+  /* ================= iskelet (ilk yükleme) ================= */
+  function skeleton() {
+    $('adsKpis').innerHTML = new Array(10).join('.').split('.').map(function () { return '<div class="kpi sk"><div class="skl w40"></div><div class="skl w70 h22"></div></div>'; }).join('');
+    var rows = '';
+    for (var i = 0; i < 12; i++) rows += '<tr>' + new Array(11).join('.').split('.').map(function (x, j) { return '<td><div class="skl ' + (j < 2 ? 'w80' : 'w50') + '"></div></td>'; }).join('') + '</tr>';
+    $('adsTable').innerHTML = '<table class="sktable"><tbody>' + rows + '</tbody></table>';
+    $('trCharts').innerHTML = '<div class="chartcard"><div class="skl w30"></div><div class="skl box-sk"></div></div>';
+  }
+
+  /* ================= tablo ================= */
+  function visibleCols(res, opt) {
+    return res.columns.map(function (c, i) { return { c: c, i: i }; }).filter(function (x) {
+      if (x.c.t === 'hidden') return false;
+      if (opt.hideIds && /_id$/.test(x.c.k)) return false;
+      if (opt.groups && (x.c.g === 'ga4' || x.c.g === 'adj') && !opt.groups[x.c.g]) return false;
+      return true;
+    });
+  }
+  function renderTable(el, res, st, opt) {
+    opt = opt || {};
+    if (!res || !res.rows.length) { el.innerHTML = '<div class="empty">Veri yok. Tarih aralığını / filtreleri kontrol edin.</div>'; return; }
+    var curIdx = -1;
+    res.columns.forEach(function (c, i) { if (c.k === '_cur') curIdx = i; });
+    var cols = visibleCols(res, opt);
+    var rows = res.rows.map(function (r, i) { return { r: r, i: i }; });
+    if (st.sort) {
+      var si = st.sort.i, dir = st.sort.dir;
+      rows.sort(function (a, b) {
+        var x = a.r[si], y = b.r[si];
+        if (bad(x)) return 1; if (bad(y)) return -1;
+        return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'tr')) * dir;
+      });
+    }
+    var order = rows.map(function (x) { return x.i; }); // görünen sıra (shift-seçim için)
+    var PAGE = 300, pages = Math.ceil(rows.length / PAGE);
+    if (st.page >= pages) st.page = 0;
+    var slice = rows.slice(st.page * PAGE, (st.page + 1) * PAGE);
+    var sel = st.sel || {};
+    var allOnPage = slice.length && slice.every(function (x) { return sel[x.i]; });
+    var h = '<table><thead><tr>' + (opt.selectable ? '<th class="cb"><input type="checkbox" id="cbAll" title="Bu sayfadakilerin hepsini seç"' + (allOnPage ? ' checked' : '') + '></th>' : '') +
+      cols.map(function (x) {
+        var arrow = st.sort && st.sort.i === x.i ? (st.sort.dir > 0 ? ' ▲' : ' ▼') : '';
+        return '<th data-i="' + x.i + '" class="' + (x.c.t === 'text' ? 't' : '') + (x.c.g === 'tot' ? ' g-tot' : '') + '">' + esc(x.c.l) + arrow + '</th>';
+      }).join('') + '</tr></thead><tbody>';
+    slice.forEach(function (x) {
+      var r = x.r;
+      h += '<tr' + (sel[x.i] ? ' class="sel"' : '') + '>' + (opt.selectable ? '<td class="cb"><input type="checkbox" data-row="' + x.i + '"' + (sel[x.i] ? ' checked' : '') + '></td>' : '') +
+        cols.map(function (cx) {
+          var v = r[cx.i];
+          if (cx.c.t === 'text') {
+            var txt = cx.c.k === 'country' ? countryName(v) : v;
+            if (opt.drill && opt.drill[cx.c.k] && v !== '') return '<td class="t"><a class="drill" data-r="' + x.i + '" data-k="' + cx.c.k + '" title="Detaya in">' + esc(txt) + '</a></td>';
+            return '<td class="t' + (/_id$/.test(cx.c.k) ? ' id' : '') + '">' + esc(txt) + '</td>';
+          }
+          if (cx.c.orig && curIdx >= 0) return '<td>' + fmtCur(v, r[curIdx]) + '</td>';
+          return '<td' + (cx.c.g === 'tot' ? ' class="g-tot"' : '') + '>' + fmt(v, cx.c.t) + '</td>';
+        }).join('') + '</tr>';
+    });
+    if (res.totals) {
+      var off = res.columns.length - res.totals.length, firstText = true;
+      h += '<tr class="tot">' + (opt.selectable ? '<td class="cb"></td>' : '') + cols.map(function (cx) {
+        if (cx.c.t === 'text') { var t = firstText ? 'Toplam (' + NF0.format(res.rows.length) + ' satır)' : ''; firstText = false; return '<td class="t">' + t + '</td>'; }
+        if (cx.c.orig && curIdx >= 0) return '<td>' + fmtCur(res.totals[cx.i - off], res.totals[curIdx - off]) + '</td>';
+        return '<td>' + fmt(res.totals[cx.i - off], cx.c.t) + '</td>';
+      }).join('') + '</tr>';
+    }
+    h += '</tbody></table>';
+    if (pages > 1) h += '<div class="pager"><button data-p="-1">‹</button> Sayfa ' + (st.page + 1) + ' / ' + pages + ' <button data-p="1">›</button></div>';
+    el.innerHTML = h;
+
+    el.querySelectorAll('th[data-i]').forEach(function (th) {
+      th.onclick = function () {
+        var ci = +th.getAttribute('data-i');
+        st.sort = st.sort && st.sort.i === ci ? { i: ci, dir: -st.sort.dir } : { i: ci, dir: res.columns[ci].t === 'text' ? 1 : -1 };
+        renderTable(el, res, st, opt);
+      };
+    });
+    el.querySelectorAll('[data-p]').forEach(function (b) {
+      b.onclick = function () { st.page = Math.max(0, Math.min(pages - 1, st.page + +b.getAttribute('data-p'))); renderTable(el, res, st, opt); };
+    });
+    if (opt.drill) el.querySelectorAll('a.drill').forEach(function (a) {
+      a.onclick = function () { opt.onDrill(res.rows[+a.getAttribute('data-r')], a.getAttribute('data-k')); };
+    });
+    if (opt.selectable) {
+      el.querySelectorAll('input[data-row]').forEach(function (cb) {
+        cb.onclick = function (ev) {
+          var ri = +cb.getAttribute('data-row');
+          var on = cb.checked;
+          // Shift + tık: son tıklanan ile bu satır arasındakilerin hepsi aynı duruma gelir
+          if (ev.shiftKey && st.lastSel != null) {
+            var a = order.indexOf(st.lastSel), b = order.indexOf(ri);
+            if (a >= 0 && b >= 0) {
+              var lo = Math.min(a, b), hi = Math.max(a, b);
+              for (var k = lo; k <= hi; k++) { if (on) sel[order[k]] = 1; else delete sel[order[k]]; }
+              st.lastSel = ri;
+              renderTable(el, res, st, opt); if (opt.onSel) opt.onSel();
+              return;
+            }
+          }
+          if (on) sel[ri] = 1; else delete sel[ri];
+          st.lastSel = ri;
+          cb.closest('tr').classList.toggle('sel', on);
+          if (opt.onSel) opt.onSel();
+        };
+      });
+      var all = el.querySelector('#cbAll');
+      if (all) all.onchange = function () {
+        slice.forEach(function (x) { if (all.checked) sel[x.i] = 1; else delete sel[x.i]; });
+        renderTable(el, res, st, opt); if (opt.onSel) opt.onSel();
+      };
+    }
+  }
+
+  /** Görünen kolonlar + (varsa) seçili satırlar → dışa aktarım tablosu. */
+  function exportView(res, st, opt) {
+    var cols = visibleCols(res, opt);
+    var curIdx = -1;
+    res.columns.forEach(function (c, i) { if (c.k === '_cur') curIdx = i; });
+    var selIdx = Object.keys(st.sel || {}).map(Number).sort(function (a, b) { return a - b; });
+    var src = selIdx.length ? selIdx.map(function (i) { return res.rows[i]; }) : res.rows;
+    var pick = cols.map(function (x) { return x.i; }).concat(curIdx >= 0 ? [curIdx] : []);
+    var outCols = pick.map(function (i) { return res.columns[i]; });
+    var rows = src.map(function (r) { return pick.map(function (i) { return r[i]; }); });
+    var totals = null;
+    if (res.totals) {
+      var off = res.columns.length - res.totals.length;
+      var full = selIdx.length ? totalsFor(res, src, false) : res.columns.map(function (c, i) { return i < off ? '' : res.totals[i - off]; });
+      totals = pick.map(function (i, j) {
+        if (res.columns[i].t === 'text') return j === 0 ? (selIdx.length ? 'Toplam (seçili ' + src.length + ')' : 'Toplam') : '';
+        return full[i];
+      });
+    }
+    return { columns: outCols, rows: rows, totals: totals };
+  }
+  function toCsv(v) {
+    var keep = v.columns.map(function (c, i) { return c.t === 'hidden' ? -1 : i; }).filter(function (i) { return i >= 0; });
+    var curI = -1; v.columns.forEach(function (c, i) { if (c.k === '_cur') curI = i; });
+    var lines = [keep.map(function (i) { return '"' + v.columns[i].l.replace(/"/g, '""') + '"'; }).join(';')];
+    (v.totals ? v.rows.concat([v.totals]) : v.rows).forEach(function (r0) {
+      lines.push(keep.map(function (i) {
+        var x = r0[i];
+        if (x == null || x === '') return '';
+        if (typeof x === 'number') {
+          var s = String(x).replace('.', ',');
+          if (v.columns[i].orig && curI >= 0 && r0[curI]) s = (CUR_SYM[r0[curI]] || r0[curI] + ' ') + s;
+          return s;
+        }
+        return '"' + String(x).replace(/"/g, '""') + '"';
+      }).join(';'));
+    });
+    return '﻿' + lines.join('\n');
+  }
+  function downloadCsv(v, name) {
+    var blob = new Blob([toCsv(v)], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name + '_' + S.from + '_' + S.to + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function exportSheet(v, title) {
+    if (!v || !v.rows.length) return toast('Aktarılacak veri yok');
+    call('apiExport', JSON.stringify({ title: title, columns: v.columns, rows: v.rows, totals: v.totals, meta: filterMeta() }), 'Google Sheets oluşturuluyor…')
+      .then(function (d) { toast('Hazır: <a href="' + d.url + '" target="_blank">Google Sheets\'te aç</a>', 15000); window.open(d.url, '_blank'); })
+      .catch(fail);
+  }
+  function kpis(el, res, keys) {
+    if (!res || !res.totals) { el.innerHTML = ''; return; }
+    var off = res.columns.length - res.totals.length;
+    var byK = {}; res.columns.forEach(function (c, i) { byK[c.k] = { c: c, v: i >= off ? res.totals[i - off] : null }; });
+    el.innerHTML = keys.filter(function (k) { return byK[k]; }).map(function (k) {
+      var v = byK[k].v, t = byK[k].c.t;
+      return '<div class="kpi" title="' + esc(byK[k].c.l + ': ' + fmt(v, t)) + '"><div class="l">' + esc(byK[k].c.l) + '</div><div class="v">' + kpiFmt(v, t) + '</div></div>';
+    }).join('');
+    fitKpis(el);
+  }
+
+  /* ================= RAPOR ================= */
+  function adsOpt() {
+    return { hideIds: !S.ads.ids, groups: S.ads.groups, selectable: true, onSel: selInfo,
+      drill: { country: 1, platform: 1, account_name: 1, campaign_name: 1, adgroup_name: 1 }, onDrill: drillAds };
+  }
+  function drawLevelSeg() {
+    seg($('adsLevel'), LEVEL_ORDER.map(function (l) { return [l, LEVEL_LABELS[l]]; }), S.ads.level, function (v) { S.ads.level = v; loadAds(); });
+  }
+  function initAds() {
+    drawLevelSeg();
+    seg($('adsGrain'), GRAINS, S.ads.grain, function (v) { S.ads.grain = v; loadAds(); });
+    drawGroupChips();
+    $('adsIds').onchange = function () { S.ads.ids = this.checked; drawAds(); };
+    $('adsCsv').onclick = function () { if (S.ads.view) downloadCsv(exportView(S.ads.view, S.ads, adsOpt()), 'rapor_' + S.ads.level); };
+    $('adsExport').onclick = function () { if (S.ads.view) exportSheet(exportView(S.ads.view, S.ads, adsOpt()), 'Rapor · ' + LEVEL_LABELS[S.ads.level]); };
+  }
+  function drawGroupChips() {
+    $('adsGroups').innerHTML = '<span class="muted small">Ekle:</span>' + GROUPS.map(function (g) {
+      return '<button class="chip' + (S.ads.groups[g[0]] ? ' on' : '') + '" data-g="' + g[0] + '">' + (S.ads.groups[g[0]] ? '✓ ' : '+ ') + g[1] + '</button>';
+    }).join('');
+    $('adsGroups').onclick = function (e) {
+      var b = e.target.closest('.chip'); if (!b) return;
+      var g = b.getAttribute('data-g'); S.ads.groups[g] = !S.ads.groups[g];
+      drawGroupChips(); drawAds();
+    };
+  }
+  function selInfo() {
+    var n = Object.keys(S.ads.sel).length;
+    var canPick = n && PICK_FIELDS[S.ads.level];
+    $('selInfo').innerHTML = n ? '<span title="CSV / Sheets aktarımı sadece seçili satırları içerir">' + n + ' seçili</span>' +
+      (canPick ? ' <button class="chip on" id="selPick" title="Tablo ve trend sadece seçili satırlarla sınırlanır; seviye değiştirince de geçerli kalır">⧩ Filtrele</button>' : '') +
+      ' <a href="#" id="selClear">temizle</a>' : '<span class="hint2">Shift + tık: aralık seç</span>';
+    var pb = $('selPick');
+    if (pb) pb.onclick = pickSelected;
+    var c = $('selClear');
+    if (c) c.onclick = function (e) { e.preventDefault(); S.ads.sel = {}; S.ads.lastSel = null; drawAds(); };
+  }
+  // Seçili satır filtresi: seviyeye göre satırı tanımlayan alanlar
+  var PICK_FIELDS = { country: ['country'], platform: ['country', 'platform'], account: ['platform', 'account_id'],
+    campaign: ['platform', 'campaign_id'], adgroup: ['adgroup_id'], ad: ['ad_id'] };
+  var PICK_NAMES = { country: 'ülke', platform: 'platform', account: 'hesap', campaign: 'kampanya', adgroup: 'ad group', ad: 'ad' };
+  function pickSelected() {
+    var res = S.ads.view, fields = PICK_FIELDS[S.ads.level];
+    if (!res || !fields) return;
+    var idx = {}; res.columns.forEach(function (c, i) { idx[c.k] = i; });
+    if (!fields.every(function (f) { return idx[f] != null; })) return toast('Bu seviyede seçili satır filtresi kullanılamıyor');
+    var rows = Object.keys(S.ads.sel).map(function (i) { return res.rows[+i]; });
+    var keys = rows.map(function (r) { return fields.map(function (f) { return String(r[idx[f]]); }).join('|'); });
+    var nameCol = { country: 'country', platform: 'platform', account: 'account_name', campaign: 'campaign_name', adgroup: 'adgroup_name', ad: 'ad_name' }[S.ads.level];
+    var names = rows.map(function (r) {
+      var v = r[idx[nameCol]];
+      if (S.ads.level === 'country') return countryName(v);
+      if (S.ads.level === 'platform') return countryName(r[idx.country]) + ' › ' + v;
+      return v;
+    });
+    // adgroup/ad filtresi daha geniş tarih aralığında anlamsız olabilir; kampanya ve üstü her seviyede geçerli
+    S.ads.pick = { fields: fields, keys: keys, level: S.ads.level, label: rows.length === 1 ? names[0] : rows.length + ' ' + PICK_NAMES[S.ads.level] + ' seçili', title: names.join(', ') };
+    S.ads.sel = {}; S.ads.lastSel = null;
+    loadAds();
+  }
+  var loadSeq = 0;
+  function loadAds() {
+    var my = ++loadSeq;
+    var p = drillParams(S.ads.level, S.ads.grain);
+    loadTrend(); // trend aynı filtre + detay + seçili satır filtresini kullanır
+    function show(res) {
+      if (my !== loadSeq) return;
+      S.ads.res = res; S.ads.sort = null; S.ads.page = 0; S.ads.sel = {}; S.ads.lastSel = null; drawAds();
+    }
+    var exact = QC[qkey(p)];
+    if (exact) { show(exact); return; }
+    var derived = S.ads.drill.length ? deriveFromBase(baseParams(S.ads.level, S.ads.grain), drillPreds()) : null;
+    if (derived) { show(derived); return; }
+    fetchQuery(p).then(function (res) { show(res); if (!S.ads.drill.length) schedulePrefetch(); })
+      .catch(function (e) { if (my === loadSeq) { $('adsWarn').textContent = e.message || e; $('adsTable').innerHTML = ''; $('adsKpis').innerHTML = ''; } });
+  }
+  function drawAds() {
+    var res = S.ads.view = mfApply(S.ads.res);
+    drawFilterBar();
+    $('adsWarn').textContent = res && res.warnings ? res.warnings.join(' · ') : '';
+    kpis($('adsKpis'), res, ['spend_usd', 'roas', 'cohort_roas', 'cpi', 'cps', 'impressions', 'clicks', 'tot_sessions', 'tot_purchases', 'tot_revenue_usd', 'coh_purchases', 'coh_revenue_usd', 'tot_installs']);
+    renderTable($('adsTable'), res, S.ads, adsOpt());
+    selInfo();
+    // eşleşme özeti
+    var d = res && res.diag, um = (res && res.unmatched) || [];
+    if (d) {
+      var pc = function (a, b) { return b ? NF2.format(a / b * 100) + '%' : '—'; };
+      $('unmatchedBox').classList.remove('hidden');
+      $('unmatchedSum').textContent = 'Eşleşme: GA4 oturumların ' + pc(d.ga4.matched, d.ga4.sessions) + '\'i, Adjust oturumların ' + pc(d.adj.matched, d.adj.sessions) + '\'i kampanyalarla eşleşti' + (um.length ? ' · eşleşmeyen ' + um.length + ' kampanya adı' : '');
+      $('unmatchedBody').innerHTML = (d.ga4.rows === 0 ? '<p class="warn">GA4 verisi henüz yok (köprü script\'i çekiyor olabilir).</p>' : '') +
+        (d.adj.rows === 0 ? '<p class="warn">Adjust verisi henüz yok. Durum > Adjust token / app token kontrol edilmeli.</p>' : '') +
+        (um.length ? '<table class="stat"><thead><tr><th class="t">Kaynak</th><th class="t">Kampanya adı (eşleşmedi)</th><th>Sessions</th><th>Purchase</th></tr></thead><tbody>' +
+          um.map(function (u) { return '<tr><td class="t">' + esc(u.src) + '</td><td class="t">' + esc(u.name) + '</td><td>' + NF0.format(u.sessions) + '</td><td>' + NF0.format(u.purchases) + '</td></tr>'; }).join('') + '</tbody></table>' : '');
+    } else if (!S.ads.drill.length) $('unmatchedBox').classList.add('hidden');
+    if (S.ads.mf.length) loadTrend(); // trend, metrik filtresine uyan satırlarla sınırlanır
+  }
+
+  /* ================= metrik filtresi (Meta / Google Ads tarzı) ================= */
+  var MF_OPS = [['gt', '>'], ['gte', '≥'], ['lt', '<'], ['lte', '≤'], ['eq', '='], ['between', 'arasında']];
+  function mfCols(res) {
+    return (res ? res.columns : B.ads.metrics.map(function (m) { return { k: m.k, l: m.l, t: m.u }; }))
+      .filter(function (c) { return c.t !== 'text' && c.t !== 'hidden' && !c.orig; });
+  }
+  function mfScale(t) { return t === 'pct' ? 0.01 : 1; } // CTR % olarak girilir
+  function mfTest(v, f, t) {
+    if (v == null || !isFinite(v)) return false;
+    var a = f.v * mfScale(t), b = f.v2 * mfScale(t), eps = 1e-9;
+    switch (f.op) {
+      case 'gt': return v > a; case 'gte': return v >= a - eps; case 'lt': return v < a; case 'lte': return v <= a + eps;
+      case 'eq': return Math.abs(v - a) <= Math.max(eps, Math.abs(a) * 0.005);
+      case 'between': return v >= Math.min(a, b) - eps && v <= Math.max(a, b) + eps;
+    }
+    return true;
+  }
+  function mfApply(res) {
+    if (!res || !S.ads.mf.length) return res;
+    var idx = {}; res.columns.forEach(function (c, i) { idx[c.k] = i; });
+    var fs = S.ads.mf.filter(function (f) { return idx[f.k] != null; });
+    if (!fs.length) return res;
+    var rows = res.rows.filter(function (r) { return fs.every(function (f) { return mfTest(r[idx[f.k]], f, res.columns[idx[f.k]].t); }); });
+    var out = {}; for (var k in res) out[k] = res[k];
+    out.rows = rows;
+    out.totals = totalsFor(res, rows, true);
+    return out;
+  }
+  function mfLabel(f) {
+    var c = mfCols(S.ads.res).filter(function (x) { return x.k === f.k; })[0] || { l: f.k, t: '' };
+    var u = c.t === 'pct' ? '%' : '';
+    var op = MF_OPS.filter(function (o) { return o[0] === f.op; })[0][1];
+    return c.l + ' ' + (f.op === 'between' ? NF2.format(f.v) + u + ' – ' + NF2.format(f.v2) + u : op + ' ' + NF2.format(f.v) + u);
+  }
+  function mfChanged() { S.ads.sel = {}; S.ads.lastSel = null; S.ads.page = 0; drawAds(); if (!S.ads.mf.length) loadTrend(); }
+  function drillAds(row, key) {
+    var idx = {};
+    S.ads.res.columns.forEach(function (c, i) { idx[c.k] = i; });
+    var v = function (k) { return idx[k] != null ? row[idx[k]] : ''; };
+    var next;
+    if (key === 'country') { S.ads.drill.push({ country: v('country'), label: countryName(v('country')) }); next = 'account'; }
+    else if (key === 'platform') { S.ads.drill.push({ country: v('country'), platform: v('platform'), label: countryName(v('country')) + ' › ' + v('platform') }); next = 'account'; }
+    else if (key === 'account_name') { S.ads.drill.push({ field: 'account_id', value: v('account_id'), platform: v('platform'), label: v('account_name') }); next = 'campaign'; }
+    else if (key === 'campaign_name') { S.ads.drill.push({ field: 'campaign_id', value: v('campaign_id'), label: v('campaign_name') }); next = 'adgroup'; }
+    else if (key === 'adgroup_name') { S.ads.drill.push({ field: 'adgroup_id', value: v('adgroup_id'), label: v('adgroup_name') }); next = 'ad'; }
+    if ((next === 'adgroup' || next === 'ad') && daysSel() > B.adMaxDays) {
+      toast('Ad seviyesi için tarih aralığı son ' + B.adMaxDays + ' güne daraltıldı.');
+      S.from = addDays(S.to, -B.adMaxDays + 1); $('fFrom').value = S.from;
+    }
+    S.ads.level = next;
+    drawLevelSeg();
+    loadAds();
+  }
+
+  /* ================= TREND (rapor sayfasında, açılır-kapanır) ================= */
+  var trCharts = [];
+  function trCatalog() { return B.ads.metrics.filter(function (m) { return !m.orig; }); }
+  function initTrend() {
+    var box = $('trendBox');
+    box.open = lsGet('rpr_trend_open', '1') === '1';
+    box.addEventListener('toggle', function () { lsSet('rpr_trend_open', box.open ? '1' : '0'); if (box.open) loadTrend(); });
+    seg($('trGrain'), GRAINS.slice(1), S.trend.grain, function (v) { S.trend.grain = v; loadTrend(); });
+    seg($('trMode'), [['multi', 'Metrik başına grafik'], ['index', 'Tek grafik (endeks)']], S.trend.mode, function (v) { S.trend.mode = v; drawTrend(); });
+    $('trBreak').innerHTML = [['none', 'Yok (toplam)'], ['country', 'Ülke'], ['platform', 'Platform'], ['account', 'Hesap'], ['campaign', 'Kampanya']]
+      .map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('');
+    $('trBreak').onchange = function () { S.trend.brk = this.value; loadTrend(); };
+    $('trExport').onclick = function () { exportSheet(trendPivot(), 'Trend'); };
+    drawTrendMetrics();
+  }
+  function drawTrendMetrics() {
+    $('trMetrics').innerHTML = trCatalog().map(function (m) {
+      return '<button class="chip' + (S.trend.metrics.indexOf(m.k) >= 0 ? ' on' : '') + '" data-k="' + m.k + '">' + esc(m.l) + '</button>';
+    }).join('');
+    $('trMetrics').onclick = function (e) {
+      var b = e.target.closest('.chip'); if (!b) return;
+      var k = b.getAttribute('data-k'), i = S.trend.metrics.indexOf(k);
+      if (i >= 0) { if (S.trend.metrics.length > 1) S.trend.metrics.splice(i, 1); } else S.trend.metrics.push(k);
+      drawTrendMetrics(); drawTrend();
+    };
+    setTrendSum();
+  }
+  function setTrendSum() {
+    var scope = [];
+    if (S.ads.pick) scope.push(S.ads.pick.label);
+    S.ads.drill.forEach(function (d) { scope.push(d.label); });
+    $('trendSum').textContent = ' · ' + S.trend.metrics.length + ' metrik' + (scope.length ? ' · ' + scope.join(' › ') : '');
+  }
+  function loadTrend() {
+    setTrendSum();
+    if (!$('trendBox').open) return;
+    var p = drillParams(S.trend.brk === 'none' ? 'total' : S.trend.brk, S.trend.grain);
+    // metrik filtresi aktifse trend sadece filtreye uyan satırları (ülke/hesap/kampanya…) kapsar
+    var mfv = S.ads.mf.length && S.ads.view && PICK_FIELDS[S.ads.level];
+    if (mfv) {
+      var idx = {}; S.ads.view.columns.forEach(function (c, i) { idx[c.k] = i; });
+      var flds = PICK_FIELDS[S.ads.level];
+      if (flds.every(function (f) { return idx[f] != null; })) {
+        var keys = S.ads.view.rows.slice(0, 2000).map(function (r) { return flds.map(function (f) { return String(r[idx[f]]); }).join('|'); });
+        p.filters.pick = { fields: flds, keys: keys.length ? keys : ['__none__'] };
+      }
+    }
+    fetchQuery(p, true).then(function (res) { S.trend.res = res; drawTrend(); })
+      .catch(function (e) { $('trWarn').textContent = e.message || e; });
+  }
+  function trendData() {
+    var res = S.trend.res; if (!res) return null;
+    var idx = {}; res.columns.forEach(function (c, i) { idx[c.k] = i; });
+    var textCols = res.columns.filter(function (c) { return c.t === 'text' && c.k !== 'period'; });
+    var labCols = textCols.filter(function (c) { return !/_id$/.test(c.k); });
+    var keyCols = textCols.map(function (c) { return idx[c.k]; });
+    var periods = [], pset = {}, ser = {}, order = [];
+    res.rows.forEach(function (r) {
+      var per = r[idx.period];
+      if (!pset[per]) { pset[per] = 1; periods.push(per); }
+      var key = keyCols.map(function (i) { return r[i]; }).join(' · ') || 'Toplam';
+      var s = ser[key];
+      if (!s) {
+        var lab = labCols.map(function (c) { var v = r[idx[c.k]]; return c.k === 'country' ? countryName(v) : v; }).join(' · ') || 'Toplam';
+        s = ser[key] = { key: key, label: lab, byP: {}, rank: 0 }; order.push(key);
+      }
+      s.byP[per] = r;
+      s.rank += +r[idx.spend_usd] || 0;
+    });
+    periods.sort();
+    var list = order.map(function (k) { return ser[k]; }).sort(function (a, b) { return b.rank - a.rank; });
+    return { periods: periods, all: list, top: list.slice(0, 8), hidden: Math.max(0, list.length - 8), idx: idx, cols: res.columns };
+  }
+  function drawTrend() {
+    trCharts.forEach(function (c) { c.destroy(); }); trCharts = [];
+    var d = trendData(); var el = $('trCharts');
+    $('trWarn').textContent = '';
+    if (!d || !d.periods.length) { el.innerHTML = '<div class="empty">Veri yok.</div>'; $('trLegend').innerHTML = ''; return; }
+    if (d.hidden) $('trWarn').textContent = 'En büyük 8 seri gösteriliyor (' + d.hidden + ' seri gizli).';
+    if (typeof Chart === 'undefined') { el.innerHTML = '<div class="empty">Grafik kütüphanesi yüklenemedi.</div>'; return; }
+    var cat = {}; d.cols.forEach(function (c) { cat[c.k] = c; });
+    var mets = S.trend.metrics.filter(function (m) { return cat[m]; });
+    var colors = d.top.map(function (s, i) { return cssVar(SERIES[i]); });
+    var multiSeries = d.top.length > 1;
+    var grid = cssVar('--grid'), ink2 = cssVar('--text-2'), surf = cssVar('--surface');
+    var labels = d.periods.map(function (p) { return S.trend.grain === 'week' ? p + ' hf' : p; });
+    function baseOpts(unit, indexed) {
+      return {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: surf, titleColor: cssVar('--text'), bodyColor: ink2, borderColor: cssVar('--line'), borderWidth: 1, padding: 10, boxWidth: 10, boxHeight: 3,
+            callbacks: { label: function (c) { return ' ' + c.dataset.label + ': ' + (indexed ? NF2.format(c.parsed.y) : fmt(c.parsed.y, c.dataset._u)); } }
+          }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: ink2, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, border: { color: grid } },
+          y: { grid: { color: grid }, border: { display: false }, ticks: { color: ink2, callback: function (v) { return indexed ? v : fmtShort(v, unit); } }, beginAtZero: !indexed }
+        },
+        elements: { line: { borderWidth: 2, tension: 0 }, point: { radius: d.periods.length > 60 ? 0 : 2, hoverRadius: 5, hitRadius: 8 } }
+      };
+    }
+    if (S.trend.mode === 'multi') {
+      $('trLegend').innerHTML = multiSeries ? d.top.map(function (s, i) { return '<span><span class="sw" style="background:' + colors[i] + '"></span>' + esc(s.label) + '</span>'; }).join('') : '';
+      el.className = 'charts';
+      el.innerHTML = mets.map(function (m, mi) { return '<div class="chartcard"><h4>' + esc(cat[m].l) + '</h4><div class="box"><canvas id="trc' + mi + '"></canvas></div></div>'; }).join('');
+      mets.forEach(function (m, mi) {
+        var ds = d.top.map(function (s, si) {
+          return { label: s.label, _u: cat[m].t, data: d.periods.map(function (p) { var r = s.byP[p]; return r ? r[d.idx[m]] : null; }), borderColor: colors[si], backgroundColor: colors[si], spanGaps: true };
+        });
+        trCharts.push(new Chart($('trc' + mi), { type: 'line', data: { labels: labels, datasets: ds }, options: baseOpts(cat[m].t, false) }));
+      });
+    } else {
+      var ds2 = [], legend = [], ci = 0;
+      mets.forEach(function (m) {
+        d.top.forEach(function (s) {
+          if (ci >= 8) return;
+          var vals = d.periods.map(function (p) { var r = s.byP[p]; return r ? r[d.idx[m]] : null; });
+          var base = vals.filter(function (v) { return v; })[0];
+          var lab = (multiSeries ? s.label + ' · ' : '') + cat[m].l;
+          ds2.push({ label: lab, data: vals.map(function (v) { return v == null || !base ? null : v / base * 100; }), borderColor: cssVar(SERIES[ci]), backgroundColor: cssVar(SERIES[ci]), spanGaps: true });
+          legend.push('<span><span class="sw" style="background:' + cssVar(SERIES[ci]) + '"></span>' + esc(lab) + '</span>');
+          ci++;
+        });
+      });
+      $('trLegend').innerHTML = legend.join('');
+      el.className = 'charts single';
+      el.innerHTML = '<div class="chartcard"><h4>Endeks (ilk dönem = 100)</h4><div class="box"><canvas id="trcI"></canvas></div></div>';
+      trCharts.push(new Chart($('trcI'), { type: 'line', data: { labels: labels, datasets: ds2 }, options: baseOpts('num', true) }));
+    }
+  }
+  function trendPivot() {
+    var d = trendData(); if (!d) return null;
+    var cat = {}; d.cols.forEach(function (c) { cat[c.k] = c; });
+    var mets = S.trend.metrics.filter(function (m) { return cat[m]; });
+    var cols = [{ k: 'period', l: 'Dönem', t: 'text' }];
+    var multiSeries = d.all.length > 1;
+    d.all.forEach(function (s) { mets.forEach(function (m) { cols.push({ k: s.key + m, l: (multiSeries ? s.label + ' · ' : '') + cat[m].l, t: cat[m].t }); }); });
+    var rows = d.periods.map(function (p) {
+      var r = [p];
+      d.all.forEach(function (s) { mets.forEach(function (m) { var x = s.byP[p]; r.push(x ? x[d.idx[m]] : null); }); });
+      return r;
+    });
+    return { columns: cols, rows: rows, totals: null };
+  }
+
+  /* ================= DURUM (sadece admin) ================= */
+  function initStatus() {
+    if (!B.isAdmin) return;
+    $('tabStatus').classList.remove('hidden');
+    $('tabs').classList.remove('hidden');
+    $('lnkConfig').href = B.links.config; $('lnkFolder').href = B.links.folder; $('cfgUrl').value = B.links.config;
+    $('guestUrl').value = B.links.guest || '';
+    $('btnCopyGuest').onclick = function () { $('guestUrl').select(); document.execCommand('copy'); toast('Kopyalandı'); };
+    $('btnCopy').onclick = function () { $('cfgUrl').select(); document.execCommand('copy'); toast('Kopyalandı'); };
+    pills();
+    $('inAdjApps').value = B.adjustApps || '';
+    $('inAdjAcc').value = B.adjustAccount || '';
+    $('btnSecrets').onclick = function () {
+      var o = { meta: $('inMeta').value, adjust: $('inAdj').value, adjustApps: $('inAdjApps').value, adjustAccount: $('inAdjAcc').value };
+      call('apiSaveSecrets', JSON.stringify(o), 'Kaydediliyor…').then(function (m) {
+        $('secMsg').textContent = m; $('inMeta').value = ''; $('inAdj').value = '';
+        if (o.meta) B.secrets.meta = true; if (o.adjust) B.secrets.adjust = true; pills(); loadStatus();
+      }).catch(function (e) { $('secMsg').textContent = '⚠ ' + (e.message || e); });
+    };
+    $('btnSync').onclick = function () { call('apiSyncNow', undefined, 'Senkron çalışıyor (maks. ~5 dk)…').then(function (r) { $('syncMsg').textContent = typeof r === 'string' ? r : ('Tamamlanan: ' + r.done + ', hata: ' + r.failed + ', bekleyen: ' + r.pending); loadStatus(); }).catch(fail); };
+    $('btnFx').onclick = function () { call('apiFxSync', undefined, 'Kurlar çekiliyor…').then(function (r) { $('syncMsg').textContent = r; loadStatus(); }).catch(fail); };
+    $('btnAdjTest').onclick = function () {
+      $('secMsg').textContent = 'Adjust test ediliyor…';
+      call('apiAdjustTest').then(function (r) { $('secMsg').style.whiteSpace = 'pre-wrap'; $('secMsg').textContent = r; }).catch(function (e) { $('secMsg').textContent = '⚠ ' + (e.message || e); });
+    };
+    $('btnRetry').onclick = function () { call('apiRetryErrors').then(function (r) { $('syncMsg').textContent = r; loadStatus(); }).catch(fail); };
+    $('btnCube').onclick = function () { call('apiRebuildCube', undefined, 'Rapor önbelleği kuruluyor (1-2 dk)…').then(function (r) { $('syncMsg').textContent = r; QC = {}; loadStatus(); }).catch(fail); };
+    $('btnRefreshStatus').onclick = loadStatus;
+    document.querySelectorAll('[data-bf]').forEach(function (b) {
+      b.onclick = function () { call('apiEnqueueBackfill', b.getAttribute('data-bf')).then(function (r) { $('syncMsg').textContent = b.textContent + ': ' + r; loadStatus(); }).catch(fail); };
+    });
+  }
+  function pills() {
+    $('stMeta').className = 'pill ' + (B.secrets.meta ? 'ok' : 'no'); $('stMeta').textContent = B.secrets.meta ? '✓ tanımlı' : '✗ yok';
+    $('stAdj').className = 'pill ' + (B.secrets.adjust ? 'ok' : 'no'); $('stAdj').textContent = B.secrets.adjust ? '✓ tanımlı ' + (B.secrets.adjustHint || '') : '✗ yok';
+  }
+  function loadStatus() {
+    call('apiStatus', undefined, 'Durum okunuyor…').then(function (st) {
+      var names = { meta: 'Meta', adjust: 'Adjust' };
+      var h = '<table class="stat"><thead><tr><th class="t">Kaynak</th><th class="t">Bekleyen</th><th class="t">Tamamlanan</th><th class="t">Hata</th><th class="t">Son sorun</th></tr></thead><tbody>';
+      ['meta', 'adjust'].forEach(function (k) {
+        var q = st.queue[k] || {};
+        if (k === 'adjust' && !B.adjustApps) q = { pending: 0, done: 0, error: 0, lastError: '⚠ Adjust app token girilmemiş — Adjust verisi çekilemiyor. Yukarıdaki "Adjust app token(lar)" alanını doldurup Kaydet\'e basın.' };
+        if (k === 'adjust' && !B.secrets.adjust) q.lastError = '⚠ Adjust API token girilmemiş.';
+        h += '<tr><td class="t">' + names[k] + '</td><td class="t">' + (q.pending || 0) + '</td><td class="t">' + (q.done || 0) + '</td><td class="t">' + (q.error || 0) + '</td><td class="t wrap">' + esc(q.lastError || '') + '</td></tr>';
+      });
+      [['Google Ads · MCC 1', st.gads], ['Google Ads · MCC 2', st.gads2 || {}]].filter(function (pair, i) { return i === 0 || (pair[1] && pair[1].GADS_LAST_RUN); }).forEach(function (pair) {
+        var g = pair[1];
+        h += '<tr><td class="t">' + pair[0] + '</td><td class="t wrap" colspan="4">' +
+          (g.GADS_LAST_RUN ? 'Son çalışma: ' + esc(g.GADS_LAST_RUN) + ' · Hesap erişimi: ' + esc(g.GADS_ACCESSIBLE) + ' · Backfill: ' + (g.GADS_BACKFILL_DONE === 'yes' ? 'tamam' : 'devam ediyor (sıradaki ay ' + esc(g.GADS_BACKFILL_CURSOR || '-') + ')') + ' · Son yenileme: ' + esc(g.GADS_LAST_REFRESH || '-')
+            : 'Script henüz çalışmadı.') + '</td></tr>';
+      });
+      var gx = st.ga4x || {};
+      h += '<tr><td class="t">GA4 (köprü)</td><td class="t wrap" colspan="4">' + (gx.GA4X_LAST_RUN ? 'Son çalışma: ' + esc(gx.GA4X_LAST_RUN) + ' · ' + esc(gx.GA4X_STATUS || '') + ' · Son yenileme: ' + esc(gx.GA4X_LAST_REFRESH || '-') : 'Köprü script\'i henüz çalışmadı') + '</td></tr>';
+      h += '<tr><td class="t">Rapor önbelleği</td><td class="t" colspan="4">Son kurulum: ' + esc(st.cubeAt || '— (henüz kurulmadı)') + '</td></tr>';
+      h += '<tr><td class="t">Kurlar</td><td class="t" colspan="4">Son tarih: ' + esc(st.fxLast || '— (Kurları güncelle)') + '</td></tr>';
+      h += '</tbody></table>';
+      $('statusBody').innerHTML = h;
+      $('filesBody').innerHTML = st.files.length ? '<table class="stat"><tbody>' + st.files.map(function (f) {
+        return '<tr><td class="t">' + esc(f.dataset) + '</td><td class="t"><a href="' + f.url + '" target="_blank">' + esc(f.period) + '</a></td><td>' + NF0.format(+f.rows || 0) + ' satır</td><td class="t muted">' + esc(f.updated) + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="muted">Henüz veri dosyası yok.</div>';
+      $('logBody').innerHTML = st.logs.length ? '<table class="stat"><tbody>' + st.logs.map(function (r) {
+        return '<tr><td class="t muted">' + esc(r[0]) + '</td><td class="t">' + esc(r[1]) + '</td><td class="t">' + esc(r[2]) + '</td><td class="t wrap">' + esc(r[3]) + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="muted">Log boş.</div>';
+    }).catch(fail);
+    call('apiFeedbackList', undefined, null, true).then(function (list) {
+      $('fbBody').innerHTML = list.length ? '<table class="stat"><thead><tr><th class="t">Zaman</th><th class="t">Kişi</th><th class="t">İstek</th><th class="t">Ekran</th><th class="t">Durum</th></tr></thead><tbody>' + list.map(function (r) {
+        return '<tr><td class="t muted">' + esc(r[0]) + '</td><td class="t">' + esc(r[2] || r[1]) + '</td><td class="t wrap">' + esc(r[3]) + '</td><td class="t wrap muted small">' + esc(r[4]) + '</td><td class="t">' + esc(r[5]) + '</td></tr>';
+      }).join('') + '</tbody></table>' : '<div class="muted">Henüz istek yok. Config dosyasındaki "Feedback" sekmesinde de tutulur.</div>';
+    }).catch(function () {});
+  }
+
+  /* ================= geri bildirim ================= */
+  function initFeedback() {
+    $('btnFeedback').onclick = function () {
+      $('fbMsg').textContent = ''; $('fbModal').classList.remove('hidden');
+      if (!$('fbName').value && B && B.viewer) $('fbName').value = B.viewer.split('@')[0];
+      $('fbText').focus();
+    };
+    $('fbCancel').onclick = function () { $('fbModal').classList.add('hidden'); };
+    $('fbModal').onclick = function (e) { if (e.target === $('fbModal')) $('fbModal').classList.add('hidden'); };
+    $('fbSend').onclick = function () {
+      var ctx = '';
+      if ($('fbCtx').checked && B) { var fm = filterMeta(); ctx = Object.keys(fm).map(function (k) { return k + ': ' + fm[k]; }).join(' · '); }
+      call('apiFeedback', JSON.stringify({ name: $('fbName').value, text: $('fbText').value, context: ctx }), 'Gönderiliyor…').then(function (m) {
+        $('fbText').value = ''; $('fbModal').classList.add('hidden'); toast(m);
+      }).catch(function (e) { $('fbMsg').textContent = '⚠ ' + (e.message || e); });
+    };
+  }
+
+  /* ================= sekmeler / başlangıç ================= */
+  var statusLoaded = false;
+  function showTab(t) {
+    S.tab = t;
+    document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === t); });
+    ['ads', 'status'].forEach(function (x) { $('p-' + x).classList.toggle('hidden', x !== t); });
+    $('filters').classList.toggle('hidden', t === 'status');
+    if (t === 'status' && !statusLoaded) { statusLoaded = true; loadStatus(); }
+  }
+  var applyT = null;
+  function scheduleApply(ms) { clearTimeout(applyT); applyT = setTimeout(applyFilters, ms == null ? 600 : ms); }
+  function applyFilters() {
+    clearTimeout(applyT);
+    S.from = $('fFrom').value; S.to = $('fTo').value;
+    if (S.from > S.to) return toast('Başlangıç tarihi bitişten sonra olamaz');
+    prefetchQ = [];
+    loadAds();
+  }
+
+  function start(b) {
+    B = b;
+    // Kampanya grubu filtresi (Brand.js > CAMPAIGN_GROUP): yoksa filtre gizlenir
+    if (!B.campaignGroup) { FDEFS = FDEFS.filter(function (d) { return d.k !== 'kinds'; }); S.f.kinds = []; }
+    else S.f.kinds = B.campaignGroup.def === 'in' ? ['ecom'] : B.campaignGroup.def === 'out' ? ['kurumsal'] : [];
+    $('app').classList.remove('hidden');
+    preset('30');
+    $('fFrom').min = $('fTo').min = B.startDate;
+    $('fFrom').max = $('fTo').max = B.dataEnd;
+    var hh = ('0' + (B.refreshHour || 0)).slice(-2) + ':00';
+    $('dataNote').textContent = 'ⓘ Bugünün verisini içermez · her gün ' + hh + ' sonrası güncellenir';
+    $('dataNote').title = 'Veriler bugünü içermez; her gün ' + hh + ' sonrası dün dahil güncellenir.';
+    if (B.lastUpdate) $('dataNote').title += ' Son güncelleme: ' + B.lastUpdate.slice(0, 16) + '.';
+    $('fFrom').onchange = function () { S.from = this.value; scheduleApply(300); };
+    $('fTo').onchange = function () { S.to = this.value; scheduleApply(300); };
+    $('fPreset').onchange = function () { if (this.value) { preset(this.value); this.value = ''; applyFilters(); } };
+    $('btnApply').onclick = applyFilters;
+    initAds(); initTrend(); initStatus(); initFeedback();
+    $('tabs').onclick = function (e) { var t = e.target.closest('button'); if (t) showTab(t.getAttribute('data-tab')); };
+    showTab('ads');
+    skeleton();
+    drawFilterBar();
+    loadAds();
+  }
+
+  // Bootstrap sayfaya gömülü gelir (ekstra istek yok); yoksa sunucudan istenir
+  if (typeof BOOT === 'object' && BOOT && BOOT.ok) start(BOOT.data);
+  else { $('app').classList.remove('hidden'); skeleton(); call('apiBootstrap').then(start).catch(fail); }
+})();
+</script>

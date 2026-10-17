@@ -1,0 +1,8 @@
+.DS_Store
+# markaya özel / kuruluma özel dosyalar repoya girmez
+.clasp.json
+**/.clasp.json
+assets/tools/deploy.json
+dist/
+assets/dist/
+assets/ga4-script/project/*.js

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title><?= APP_NAME ?></title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><svg aria-label="SEM" xmlns="http://www.w3.org/2000/svg" width="87" height="31" viewBox="0 0 87 31" fill="none"><path d="M3.46743 21.1413C5.56063 23.321 8.80964 25.1457 12.9005 25.1457C16.3725 25.1457 18.0652 23.4984 18.0652 21.8057C18.0652 19.5805 15.4851 18.8251 12.0586 18.0243C7.20788 16.9094 0.978344 15.5761 0.978344 8.94615C0.978344 4.00438 5.2512 0 12.2361 0C16.9549 0 20.8683 1.42429 23.8079 4.14089L20.2904 8.76868C17.8878 6.54352 14.6842 5.51967 11.7902 5.51967C8.8961 5.51967 7.43086 6.76649 7.43086 8.54571C7.43086 10.5479 9.92449 11.1713 13.351 11.9722C18.2472 13.0825 24.4768 14.5523 24.4768 21.1413C24.4768 26.57 20.6044 30.6654 12.5956 30.6654C6.89845 30.6654 2.80307 28.7496 0 25.9466L3.47198 21.1413H3.46743Z" fill="#06AEEF"></path><path d="M28.7451 30.1288V0.446289H49.7499V5.87495H35.0611V12.3275H49.4359V17.7561H35.0611V24.6546H49.7499V30.1288H28.7451Z" fill="#06AEEF"></path><path d="M80.5021 30.1288V8.76903L72.1339 30.1288H69.3763L61.008 8.76903V30.1288H54.6875V0.446289H63.5426L70.7505 18.9574L77.963 0.446289H86.8636V30.1288H80.4975H80.5021Z" fill="#06AEEF"></path></svg><span class="bsep"></span><span><?= APP_NAME ?></span></div>
+    <span class="upd" id="dataNote" title="Veriler bugünü içermez; her sabah 03:00'te (İstanbul) dün dahil güncellenir.">ⓘ Bugünün verisini içermez · her gün 03:00'te güncellenir</span>
+    <nav class="tabs hidden" id="tabs">
+      <button data-tab="ads" class="on">Rapor</button>
+      <button data-tab="status" id="tabStatus" class="hidden">Durum</button>
+    </nav>
+    <div class="spacer"></div>
+    <button class="fbbtn" id="btnFeedback">✎ Raporda değişmesini istediğim bir şey var</button>
+  </header>
+
+  <div id="app" class="hidden">
+    <section class="filters" id="filters">
+      <div class="f-group">
+        <label>Tarih</label>
+        <div class="row">
+          <input type="date" id="fFrom"> <span class="muted">–</span> <input type="date" id="fTo">
+          <select id="fPreset">
+            <option value="">Hazır aralık…</option>
+            <option value="7">Son 7 gün</option>
+            <option value="30">Son 30 gün</option>
+            <option value="90">Son 90 gün</option>
+            <option value="mtd">Bu ay</option>
+            <option value="lm">Geçen ay</option>
+            <option value="ytd">Bu yıl</option>
+            <option value="2025">2025</option>
+            <option value="all">Tümü (2025-01'den)</option>
+          </select>
+        </div>
+      </div>
+      <div class="f-group grow"><label>Filtreler</label><div class="fbar" id="fBar"></div></div>
+      <div class="hidden"><button id="btnApply">Uygula</button></div>
+    </section>
+
+    <!-- RAPOR -->
+    <section class="panel" id="p-ads">
+      <details class="trendbox" id="trendBox" open>
+        <summary><span class="tb-title">Trend</span><span class="muted small" id="trendSum"></span></summary>
+        <div class="toolbar">
+          <div class="seg" id="trGrain"></div>
+          <label class="inl">Kırılım <select id="trBreak"></select></label>
+          <div class="seg" id="trMode"></div>
+          <div class="spacer"></div>
+          <button id="trExport">Trendi Sheets'e aktar</button>
+        </div>
+        <div class="metricpick" id="trMetrics"></div>
+        <div class="warn" id="trWarn"></div>
+        <div class="legend" id="trLegend"></div>
+        <div class="charts" id="trCharts"></div>
+      </details>
+
+      <div class="toolbar">
+        <div class="seg" id="adsLevel"></div>
+        <div class="seg" id="adsGrain"></div>
+        <div class="grpchips" id="adsGroups"></div>
+        <label class="switch"><input type="checkbox" id="adsIds"><span class="slider"></span><span class="sw-l">ID'leri göster</span></label>
+        <div class="tb-right">
+          <span class="muted small" id="selInfo"></span>
+          <button id="adsCsv">CSV</button>
+          <button id="adsExport" class="accent" title="Google Sheets'e aktar">Sheets'e aktar</button>
+        </div>
+      </div>
+      <div class="kpis" id="adsKpis"></div>
+      <div class="warn" id="adsWarn"></div>
+      <div class="tablewrap" id="adsTable"></div>
+      <details class="tabledetails hidden" id="unmatchedBox"><summary id="unmatchedSum">Eşleşme</summary><div id="unmatchedBody"></div></details>
+    </section>
+
+    <!-- DURUM -->
+    <section class="panel hidden" id="p-status">
+      <div class="grid2">
+        <div class="card">
+          <h3>Bağlantılar</h3>
+          <p><a id="lnkConfig" target="_blank">Config dosyası (hesaplar, ayarlar)</a> · <a id="lnkFolder" target="_blank">Drive klasörü</a></p>
+          <label>Marka ekibine gönderilecek misafir linki <span class="hint" title="Config > Settings > GUEST_EMAILS listesindeki adresler bu linkten mail koduyla girer">?</span></label>
+          <div class="row"><input type="text" id="guestUrl" readonly placeholder="Misafir erişimi kurulmadı"><button id="btnCopyGuest">Kopyala</button></div>
+          <label>Google Ads script'i için <code>CONFIG_URL</code></label>
+          <div class="row"><input type="text" id="cfgUrl" readonly><button id="btnCopy">Kopyala</button></div>
+        </div>
+        <div class="card">
+          <h3>API erişimleri</h3>
+          <label>Meta erişim token'ı <span id="stMeta" class="pill"></span></label>
+          <div class="row"><input type="password" id="inMeta" placeholder="System User token (ads_read)"></div>
+          <label>Adjust API token <span id="stAdj" class="pill"></span></label>
+          <div class="row"><input type="password" id="inAdj" placeholder="Adjust > Hesap ayarları > API token"></div>
+          <label>Adjust hesap ID <span class="hint" title="Birden fazla Adjust hesabındaysanız hangi hesabın verisinin çekileceğini belirler (X-Account-ID). Adjust Suite URL'sinde ya da hesap menüsünde görünür.">?</span></label>
+          <div class="row"><input type="text" id="inAdjAcc" placeholder="ör. 12345"></div>
+          <label>Adjust app token(lar)</label>
+          <div class="row"><input type="text" id="inAdjApps" placeholder="abc123xyz,def456..."></div>
+          <button class="primary" id="btnSecrets">Kaydet</button> <button id="btnAdjTest">Adjust token'ını test et</button>
+          <div class="msg" id="secMsg"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Senkron</h3>
+        <div class="row wrap">
+          <button id="btnSync">Şimdi yenile</button>
+          <button id="btnFx">Kurları güncelle</button>
+          <button id="btnRetry">Hataları yeniden dene</button>
+          <button data-bf="meta">Meta backfill</button>
+          <button data-bf="adjust">Adjust backfill</button>
+          <button id="btnCube">Rapor önbelleğini yenile</button>
+          <button id="btnRefreshStatus">↻</button>
+        </div>
+        <div class="msg" id="syncMsg"></div>
+        <div id="statusBody"></div>
+      </div>
+      <div class="card"><h3>Raporda değişiklik istekleri</h3><div id="fbBody" class="scroll"></div></div>
+      <div class="grid2">
+        <div class="card"><h3>Veri dosyaları</h3><div id="filesBody" class="scroll"></div></div>
+        <div class="card"><h3>Log</h3><div id="logBody" class="scroll"></div></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Geri bildirim penceresi -->
+  <div class="modal hidden" id="fbModal">
+    <div class="modal-card">
+      <h3>Raporda değişmesini istediğim bir şey var</h3>
+      <p class="muted small">Eksik metrik, yanlış görünen bir değer, yeni kırılım… Ne olursa yazın; kayıt altına alınır ve rapor buna göre düzenlenir.</p>
+      <label>İsim</label>
+      <input type="text" id="fbName" placeholder="Adınız">
+      <label>İstek</label>
+      <textarea id="fbText" rows="6" placeholder="Örn. Kampanya tablosunda frekans metriğini görmek istiyorum."></textarea>
+      <label class="chk"><input type="checkbox" id="fbCtx" checked> Şu anki ekran ve filtre bilgisini ekle</label>
+      <div class="row end">
+        <button id="fbCancel">Vazgeç</button>
+        <button class="primary" id="fbSend">Gönder</button>
+      </div>
+      <div class="msg" id="fbMsg"></div>
+    </div>
+  </div>
+
+  <div id="busy" class="busy hidden"><div class="spin"></div><span id="busyTxt">Veriler yükleniyor…</span></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script>var BOOT = <?!= bootJson ?>; window.__GK = <?!= JSON.stringify(guestKey || '') ?>;</script>
+  <?!= include('App'); ?>
+</body>
+</html>
