@@ -21,6 +21,12 @@ var R_LEVELS = {
   ad: ['country', 'platform', 'account_name', 'account_id', 'campaign_name', 'campaign_id', 'adgroup_name', 'adgroup_id', 'ad_name', 'ad_id', 'ad_type']
 };
 
+// Tek pazarlı markada ülke boyutu raporda yer almaz: Ülke seviyesi kalkar, diğer seviyelerden ülke kolonu çıkar
+if (!showCountry_()) {
+  delete R_LEVELS.country;
+  Object.keys(R_LEVELS).forEach(function (k) { R_LEVELS[k] = R_LEVELS[k].filter(function (f) { return f !== 'country'; }); });
+}
+
 function r_sum_(a, b) { return (a || 0) + (b || 0); }
 
 var R_METRICS = [

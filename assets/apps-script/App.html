@@ -206,11 +206,11 @@
   var prefetchQ = [], prefetching = false;
   function schedulePrefetch() {
     var g = S.ads.grain;
-    var lv = ['campaign', 'country', 'platform', 'account', 'total'];
+    var lv = ['campaign', 'country', 'platform', 'account', 'total'].filter(function (l) { return LEVEL_ORDER.indexOf(l) >= 0; });
     if (daysSel() <= B.adMaxDays) lv.push('adgroup');
     prefetchQ = lv.map(function (l) { return baseParams(l, g); });
     // trend kırılımları (açıksa)
-    if ($('trendBox').open) ['total', 'country', 'platform'].forEach(function (l) { prefetchQ.push(baseParams(l, S.trend.grain)); });
+    if ($('trendBox').open) ['total', 'country', 'platform'].filter(function (l) { return LEVEL_ORDER.indexOf(l) >= 0; }).forEach(function (l) { prefetchQ.push(baseParams(l, S.trend.grain)); });
     runPrefetch();
   }
   function runPrefetch() {
@@ -833,7 +833,7 @@
     var v = function (k) { return idx[k] != null ? row[idx[k]] : ''; };
     var next;
     if (key === 'country') { S.ads.drill.push({ country: v('country'), label: countryName(v('country')) }); next = 'account'; }
-    else if (key === 'platform') { S.ads.drill.push({ country: v('country'), platform: v('platform'), label: countryName(v('country')) + ' › ' + v('platform') }); next = 'account'; }
+    else if (key === 'platform') { S.ads.drill.push({ country: v('country'), platform: v('platform'), label: (B.showCountry ? countryName(v('country')) + ' › ' : '') + v('platform') }); next = 'account'; }
     else if (key === 'account_name') { S.ads.drill.push({ field: 'account_id', value: v('account_id'), platform: v('platform'), label: v('account_name') }); next = 'campaign'; }
     else if (key === 'campaign_name') { S.ads.drill.push({ field: 'campaign_id', value: v('campaign_id'), label: v('campaign_name') }); next = 'adgroup'; }
     else if (key === 'adgroup_name') { S.ads.drill.push({ field: 'adgroup_id', value: v('adgroup_id'), label: v('adgroup_name') }); next = 'ad'; }
@@ -855,7 +855,7 @@
     box.addEventListener('toggle', function () { lsSet('rpr_trend_open', box.open ? '1' : '0'); if (box.open) loadTrend(); });
     seg($('trGrain'), GRAINS.slice(1), S.trend.grain, function (v) { S.trend.grain = v; loadTrend(); });
     seg($('trMode'), [['multi', 'Metrik başına grafik'], ['index', 'Tek grafik (endeks)']], S.trend.mode, function (v) { S.trend.mode = v; drawTrend(); });
-    $('trBreak').innerHTML = [['none', 'Yok (toplam)'], ['country', 'Ülke'], ['platform', 'Platform'], ['account', 'Hesap'], ['campaign', 'Kampanya']]
+    $('trBreak').innerHTML = [['none', 'Yok (toplam)'], ['country', 'Ülke'], ['platform', 'Platform'], ['account', 'Hesap'], ['campaign', 'Kampanya']].filter(function (o) { return B.showCountry || o[0] !== 'country'; })
       .map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('');
     $('trBreak').onchange = function () { S.trend.brk = this.value; loadTrend(); };
     $('trExport').onclick = function () { exportSheet(trendPivot(), 'Trend'); };
@@ -1105,6 +1105,13 @@
 
   function start(b) {
     B = b;
+    // Tek pazarlı marka (Brand.js > SHOW_COUNTRY): ülke seviyesi, filtresi ve kolonu gizlenir
+    if (!B.showCountry) {
+      LEVEL_ORDER = LEVEL_ORDER.filter(function (l) { return l !== 'country'; });
+      FDEFS = FDEFS.filter(function (d) { return d.k !== 'countries'; });
+      PICK_FIELDS.platform = ['platform'];
+      if (S.ads.level === 'country') S.ads.level = 'platform';
+    }
     // Kampanya grubu filtresi (Brand.js > CAMPAIGN_GROUP): yoksa filtre gizlenir
     if (!B.campaignGroup) { FDEFS = FDEFS.filter(function (d) { return d.k !== 'kinds'; }); S.f.kinds = []; }
     else S.f.kinds = B.campaignGroup.def === 'in' ? ['ecom'] : B.campaignGroup.def === 'out' ? ['kurumsal'] : [];

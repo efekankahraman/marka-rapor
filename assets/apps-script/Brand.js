@@ -32,6 +32,9 @@ var BRAND = {
   MARKETS: {
     TR: { tr: 'Türkiye', en: 'Turkey' }
   },
+  // Raporda ülke kırılımı (Ülke seviyesi, ülke filtresi, ülke kolonu) gösterilsin mi?
+  // null = otomatik: hariç tutulanlar dışında birden fazla pazar varsa göster. Hesaplar tek ülkede yayındaysa false.
+  SHOW_COUNTRY: null,
   // Adjust / GA4'te hariç tutulacak ülkeler (ör. yurtdışı raporunda TR). Kod + GA4'teki ülke adları
   EXCLUDE_MARKET_CODES: [],
   EXCLUDE_MARKET_NAMES: [],

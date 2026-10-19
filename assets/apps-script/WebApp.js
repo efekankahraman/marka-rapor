@@ -79,6 +79,7 @@ function apiBootstrap(_a, gk) { GK_ = gk || '';
       ads: { levels: Object.keys(R_LEVELS), metrics: R_METRICS.map(function (m) { return { k: m.k, l: m.l, u: m.u, g: m.g, orig: !!m.orig, web: !!m.web }; }) },
       viewer: who_(), guest: !!GUEST_,
       appName: APP_NAME,
+      showCountry: showCountry_(),
       campaignGroup: BRAND.CAMPAIGN_GROUP ? { inLabel: BRAND.CAMPAIGN_GROUP.IN_LABEL, outLabel: BRAND.CAMPAIGN_GROUP.OUT_LABEL, keyword: BRAND.CAMPAIGN_GROUP.KEYWORD, def: BRAND.CAMPAIGN_GROUP.DEFAULT || '' } : null,
       isAdmin: admin,
       startDate: s.START_DATE || '2025-01-01',

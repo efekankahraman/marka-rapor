@@ -47,6 +47,9 @@ Varsayımla ilerleme. AskUserQuestion ile, birbirine bağlı soruları tek turda
 2. **Pazarlar.**
    - Tek ülke mi, çok ülke mi? Ülke kodları (ISO-2) ve Türkçe/İngilizce adları.
    - Raporda hariç tutulacak pazar var mı? Ör. yurtdışı raporunda TR. Varsa GA4'teki ülke adlarıyla birlikte al (`Turkey, Türkiye`).
+   - **Reklamlar tek ülkede mi yayında?** Bunu mutlaka ayrıca sor; marka çok ülkeli olsa bile bu hesaplar tek ülkede yayında olabilir.
+     - Evet ise `SHOW_COUNTRY: false` yap. Raporda Ülke seviyesi, ülke filtresi ve ülke kolonu çıkar; rapor Platform seviyesiyle açılır. `MARKETS`'a sadece o ülkeyi yaz.
+     - Birden fazla ülkede yayındaysa `SHOW_COUNTRY: null` bırak; ülke kırılımı otomatik gelir.
 3. **Veri kaynakları** (çoklu seçim): Google Ads, Meta, GA4, Adjust.
 4. **Erişim.**
    - Marka ekibinden rapora girecek e-postalar.

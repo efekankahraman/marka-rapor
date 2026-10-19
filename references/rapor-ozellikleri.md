@@ -24,6 +24,7 @@ GA4 Data API ───────────┘                               
 ## Ekranlar
 
 - **Rapor:** Seviye (Toplam › Ülke › Ülke·Platform › Hesap › Kampanya › Ad group › Ad) × Zaman (Dönemsiz / Günlük / Haftalık / Aylık).
+  - Tek ülkede yayında olan markada (Brand.js > `SHOW_COUNTRY: false` ya da tek aktif pazar) Ülke seviyesi, ülke filtresi ve ülke kolonu gösterilmez.
   - İsimlere tıklayınca bir alt seviyeye inilir; üstteki etiketlerden geri çıkılır.
   - Satırlar seçilebilir; CSV ve "Google Sheets'e aktar" seçili satırları (yoksa tümünü) ve görünen kolonları içerir.
 - **Trend:** birden çok metrik, isteğe bağlı kırılım (en büyük 8 seri), "metrik başına grafik" ya da "tek grafik (endeks)".

@@ -14,6 +14,12 @@ function excludedMarket_(code) {
   return (BRAND.EXCLUDE_MARKET_CODES || []).map(function (x) { return String(x).toUpperCase(); }).indexOf(String(code || '').toUpperCase()) >= 0;
 }
 
+/** Raporda ülke kırılımı gösterilsin mi? (Brand.js > SHOW_COUNTRY; null = birden fazla aktif pazar varsa) */
+function showCountry_() {
+  if (BRAND.SHOW_COUNTRY === true || BRAND.SHOW_COUNTRY === false) return BRAND.SHOW_COUNTRY;
+  return Object.keys(COUNTRIES).filter(function (c) { return !excludedMarket_(c); }).length > 1;
+}
+
 // [anahtar, değer, açıklama]
 var DEFAULT_SETTINGS = [
   ['START_DATE', BRAND.START_DATE || '2025-01-01', 'Tüm kaynaklar için verinin başladığı tarih'],
