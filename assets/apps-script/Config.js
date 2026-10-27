@@ -4,6 +4,10 @@
 
 var APP_NAME = BRAND.REPORT_NAME;
 
+// Raporun para birimi (Brand.js > REPORT_CURRENCY). Kod içinde alan adları 'usd' kalır; değerler bu birimdedir.
+var REPORT_CUR = String(BRAND.REPORT_CURRENCY || 'USD').toUpperCase();
+var REPORT_SYM = ({ USD: '$', TRY: '₺', EUR: '€', GBP: '£' })[REPORT_CUR] || REPORT_CUR;
+
 var COUNTRIES = BRAND.MARKETS || {};
 
 // [Platform, Ülke kodu, Hesap adı, Hesap ID, Tip, Not]
@@ -34,7 +38,7 @@ var DEFAULT_SETTINGS = [
   ['ADJUST_METRICS', 'installs,sessions,revenue,revenue_events', 'Adjust Report Service metrikleri (event: <slug>_events)'],
   ['ADJUST_EXCLUDE_COUNTRIES', (BRAND.EXCLUDE_MARKET_CODES || []).join(',').toLowerCase(), 'Hariç tutulacak ülke kodları'],
   ['ADJUST_LOOKBACK_DAYS', '7', 'Adjust günlük yenileme geriye dönük gün'],
-  ['GA4_DIMENSIONS', 'sessionCampaignName', 'GA4 boyutları (date otomatik eklenir). Rapor kampanya adıyla eşleştirir'],
+  ['GA4_DIMENSIONS', 'sessionCampaignName,sessionSourceMedium', 'GA4 boyutları (date otomatik eklenir). Rapor önce kampanya adıyla, olmazsa kaynak / araçla mecraya eşleştirir'],
   ['GA4_METRICS', 'sessions,ecommercePurchases,purchaseRevenue', 'GA4 metrikleri'],
   ['GA4_EXCLUDE_COUNTRIES', (BRAND.EXCLUDE_MARKET_NAMES || []).join(','), 'GA4 country boyutunda hariç tutulacaklar'],
   ['GA4_LOOKBACK_DAYS', '3', 'GA4 günlük yenileme geriye dönük gün'],
@@ -55,6 +59,15 @@ var DEFAULT_SETTINGS = [
   ['ADMIN_EMAILS', (BRAND.ADMIN_EMAILS || []).join(', '), 'Durum sekmesini görebilen hesaplar (virgülle)'],
   ['AD_LEVEL_MAX_DAYS', '186', 'Rapor ekranında ad/ad group seviyesi için maks. tarih aralığı (gün)'],
   ['AG_START_DATE', BRAND.AG_START_DATE || '2026-01-01', 'Ad group seviyesinde GA4 / Adjust verisinin başladığı tarih'],
+  ['EXT_LOOKBACK_DAYS', '7', 'TikTok / Yandex Direct / RTB House günlük yenilemede geriye dönük gün'],
+  ['YANDEX_INCLUDE_VAT', 'NO', 'Yandex Direct harcaması KDV dahil mi? (YES / NO)'],
+  ['RTBHOUSE_COUNT_CONVENTION', 'ATTRIBUTED', 'RTB House dönüşüm sayımı: ATTRIBUTED | POST_VIEW | ALL_POST_CLICK | ALL_CONVERSIONS'],
+  ['CRITEO_API_VERSION', 'preview', 'Criteo API sürümü (ör. preview ya da 2025-10)'],
+  ['CRITEO_COST_METRIC', 'AdvertiserCost', 'Criteo harcama metriği'],
+  ['CRITEO_SALES_METRIC', 'SalesAllClientAttribution', 'Criteo satış (dönüşüm) metriği'],
+  ['CRITEO_REVENUE_METRIC', 'RevenueGeneratedAllClientAttribution', 'Criteo gelir metriği'],
+  ['YANGO_CURRENCY', 'TRY', 'Yango Ads hesap para birimi (API kampanyada vermezse)'],
+  ['BING_LOOKBACK_DAYS', '14', 'Microsoft Ads script günlük yenilemede geriye dönük gün'],
   ['GUEST_EMAILS', (BRAND.GUEST_EMAILS || []).join(', '), BRAND.AGENCY_DOMAIN + ' dışından rapora erişebilecek e-postalar (virgülle). Misafir linkini açıp e-postasına gelen kodla girer. Link: State > GUEST_LINKS']
 ];
 

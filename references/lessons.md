@@ -1,4 +1,4 @@
-# Öğrenilenler (ilk kurulum: çok pazarlı bir perakende markası)
+# Öğrenilenler (kurulumlardan)
 
 Kodu değiştirmeden ya da bir sorunu teşhis etmeden önce oku. Her madde gerçek bir hatadan geliyor.
 
@@ -38,3 +38,16 @@ Kodu değiştirmeden ya da bir sorunu teşhis etmeden önce oku. Her madde gerç
 20. `clasp create-script` mevcut `appsscript.json`'u varsayılanla ezebilir. Oluşturduktan sonra manifesti assets'teki haliyle geri koy.
 21. Dosya yükleme sırası alfabetiktir: `Brand.js`'teki `BRAND` nesnesine sadece adı B'den sonra gelen dosyalar dosya seviyesinde (fonksiyon dışında) erişebilir. Yeni bir dosyaya üst seviyede `BRAND` kullanacaksan adını buna göre seç.
 22. Meta tokenı, Adjust API tokenı gibi gizli bilgiler Brand.js'e ya da Config'e yazılmaz; web uygulaması > Durum'dan girilir ve Script Properties'te durur.
+
+## İkinci kurulum (tek pazarlı e-ticaret markası, web + app, 9 mecra)
+
+23. **Gelir panelden değil GA4 / Adjust'tan gelir.** "Criteo'da gelir yok" gibi şikayetlerde önce Durum'daki teşhise bak: panelde gelir varsa sorun eşleşmedir. GA4 trafiği kampanya adıyla tutmuyorsa kaynak / araç eşleştirmesi (GA4_DIMENSIONS = `sessionCampaignName,sessionSourceMedium`) mecraya yazar. Bu ayar sonradan açıldıysa State > `GA4X_CURSOR_<property>`'yi bu aya çekip GA4'ü yeniden çektir.
+24. **Kampanyasız ama ücretli trafik.** GA4 senkronu `(organic)`, `(direct)`, `(not set)` kampanyalarını atar; kaynak / araç boyutu varsa ücretli görünen araçlar (cpc, display, paid…) yine tutulur.
+25. **Küpü yeniden kurdurmak.** Cube.js'te eşleştirme mantığı değişince Sync.js'teki `CUBE_CUR` anahtarının sonekini değiştir (ör. `'|sm1'`); bir sonraki senkron küpü bir kez yeniden kurar.
+26. **Collaborative Ads (CPAS).** Satış ve değer standart `actions` alanında değil `catalog_segment_actions` / `catalog_segment_value`'da gelir. CPAS hesapları ana rapordan ve küpten çıkarılır (`cpas_is_`), kendi sekmesinde gösterilir.
+27. **GA4 413 "response too large".** Ad group sorgusunda sayfa boyutu 20000'e düşürüldü. Yeni sorgu eklerken büyük LIMIT kullanma.
+28. **Yango API'si sık 504 veriyor.** Kod 5xx'te 3 kez dener, sonra güne böler ve başarısız kampanyayı atlayıp uyarı yazar. Tamamen düşerse Manuel Veri sekmesi yedek.
+29. **CSS `</style>`'dan sonra eklenirse sayfanın üstünde ham metin olarak görünür.** Styles.html'e eklemeyi her zaman `</style>`'dan önce yap.
+30. **Uzun komutlar osascript'te zaman aşımına uğrar.** clasp push + deploy + build'i ayrı çağrılara böl.
+31. **Kreatif kartları:** Google'ın düşük çözünürlüklü (≤120 px) YouTube önizlemeleri ve açılmayan görseller kartta gizlenir; logolar (`LOGO` alan tipi) gösterilmez.
+32. **Karşılaştırma iki sorgu çalıştırır** (`cmp_run_`): seçili dönem + karşılaştırma dönemi. Ad seviyesinde büyük aralıklar yavaşlayabilir; bu normal.

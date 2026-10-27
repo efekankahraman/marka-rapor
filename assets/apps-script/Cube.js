@@ -50,12 +50,20 @@ function cube_build_(ss) {
   };
   q_readShards_(ss, 'gads_campaign', from, to, gRead);
   q_readShards_(ss, 'gads_campaign_2', from, to, gRead);
-  q_readShards_(ss, 'meta_campaign', from, to, function (r, ix) {
+  q_readShards_(ss, 'meta_campaign', from, to, function (r, ix) { if (cpas_is_(r[1])) return;
     var cur = r[ix.currency];
     var ci = camp('Meta', r[1], r[ix.campaign_id], r[ix.campaign_name], cur);
     var rr = row(r[0], ci), sp = +r[ix.spend] || 0, rate = perUsd(r[0], cur);
     rr[2] += sp; rr[3] += rate ? sp / rate : 0;
     rr[4] += +r[ix.link_clicks] || 0; rr[5] += +r[ix.impressions] || 0; rr[6] += +r[ix.installs] || 0;
+  });
+  // diğer platformlar (TikTok, Microsoft Ads, Yandex Direct, RTB House, manuel)
+  ext_readAll_(ss, from, to, function (r, ix) {
+    var cur = r[ix.currency];
+    var ci = camp(String(r[ix.platform]), r[1], r[ix.campaign_id], r[ix.campaign_name], cur);
+    var rr = row(r[0], ci), sp = +r[ix.spend] || 0, rate = perUsd(r[0], cur);
+    rr[2] += sp; rr[3] += rate ? sp / rate : 0;
+    rr[4] += +r[ix.clicks] || 0; rr[5] += +r[ix.impressions] || 0; rr[6] += +r[ix.installs] || 0;
   });
   camps.forEach(function (c, i) {
     var k = r_ckey_(c[3]);
@@ -63,6 +71,39 @@ function cube_build_(ss) {
     byId[c[2]] = i;
   });
 
+  // 1b) Elle eşleştirme kuralları (Config > Eşleştirme): kampanya adı kalıbı → mecra (+ isteğe bağlı kampanya)
+  var mapRules = map_rules_(ss);
+  function mapLookup(src, name) {
+    for (var i = 0; i < mapRules.length; i++) {
+      var r = mapRules[i];
+      if (r.src && r.src !== src) continue;
+      if (!r.re.test(String(name || ''))) continue;
+      for (var j = 0; j < camps.length; j++) {
+        if (camps[j][0] !== r.platform) continue;
+        if (r.camp && r_ckey_(camps[j][3]) !== r_ckey_(r.camp)) continue;
+        return j;
+      }
+    }
+    return null;
+  }
+  // 1c) Kampanya adı eşleşmezse kaynak / araçtan mecra: o mecranın "(Eşleşmeyen kampanyalar)" satırına yazılır
+  var SM_RULES = [[/criteo/i, 'Criteo'], [/rtb ?house/i, 'RTB House'], [/yango/i, 'Yango Ads'], [/yandex/i, 'Yandex Direct'], [/tiktok/i, 'TikTok'],
+    [/bing|microsoft|msn/i, 'Microsoft Ads'], [/facebook|instagram|\bfb\b|\big\b|meta|messenger|audience.?network/i, 'Meta'], [/google|youtube|dv360|\bgdn\b|adwords/i, 'Google Ads']];
+  var smRules = mapRules.filter(function (r) { return /kaynak|source/i.test(r.src); });
+  function smPlatform(sm) {
+    sm = String(sm || '');
+    if (!sm) return '';
+    for (var i = 0; i < smRules.length; i++) if (smRules[i].re.test(sm)) return smRules[i].platform;
+    if (!/\/\s*(cpc|ppc|cpm|cpv|paid\S*|display|banner|retargeting|remarketing|video|ads?|social_paid)\s*$/i.test(sm) && !/criteo|rtb ?house|yango/i.test(sm)) return '';
+    for (var j = 0; j < SM_RULES.length; j++) if (SM_RULES[j][0].test(sm)) return SM_RULES[j][1];
+    return '';
+  }
+  var unmCamp = {};
+  function unmatchedCamp(platform) {
+    if (unmCamp[platform] != null) return unmCamp[platform];
+    var a = sh_accounts_(ss, platform).filter(function (x) { return x.active && !(platform === 'Meta' && cpas_is_(x.id)); })[0];
+    return (unmCamp[platform] = a ? camp(platform, a.id, 'unmatched-ga4', '(Eşleşmeyen kampanyalar)', a.currency) : -1);
+  }
   // 2) GA4 (web) + Adjust (app) eşleştirme — sadece burada, bir kez
   var unmatched = {}, diag = { ga4: { rows: 0, sessions: 0, matched: 0 }, adj: { rows: 0, sessions: 0, matched: 0 } };
   function miss(src, month, name, country, sess, pur) {
@@ -77,6 +118,8 @@ function cube_build_(ss) {
     diag.ga4.rows++; diag.ga4.sessions += sess;
     var id = r_cid_(name);
     var ci = id && byId[id] != null ? byId[id] : r_ckLookup_(byKey, name);
+    if (ci == null) ci = mapLookup('GA4', name);
+    if (ci == null && ix.sessionSourceMedium != null) { var spl = smPlatform(r[ix.sessionSourceMedium]); if (spl) { var uc = unmatchedCamp(spl); if (uc >= 0) { ci = uc; miss('GA4', r[0].slice(0, 7), name + ' [' + r[ix.sessionSourceMedium] + ' → ' + spl + ']', code || '', 0, 0); } } }
     if (ci == null) { miss('GA4', r[0].slice(0, 7), name, code || '', sess, pur); return; }
     diag.ga4.matched += sess;
     var rate = perUsd(r[0], (pa && pa.currency) || 'USD');
@@ -94,6 +137,7 @@ function cube_build_(ss) {
     diag.adj.rows++; diag.adj.sessions += sess;
     var id = r_cid_(name);
     var ci = id && byId[id] != null ? byId[id] : r_ckLookup_(byKey, name);
+    if (ci == null) ci = mapLookup('Adjust', name);
     if (ci == null) { miss('Adjust', r[0].slice(0, 7), name, String(r[ix.country] || ''), sess, pur); return; }
     diag.adj.matched += sess;
     var rate = perUsd(r[0], acur);
@@ -107,6 +151,13 @@ function cube_build_(ss) {
   var list = [];
   for (var k in rows) list.push(rows[k].map(function (v, i) { return i > 1 && typeof v === 'number' ? Math.round(v * 100) / 100 : v; }));
   var um = Object.keys(unmatched).map(function (k) { return unmatched[k]; });
+  // eşleşmeyenlerin özeti (son 90 gün, en çok oturum) → State > UNMATCHED_TOP (teşhis ve Eşleştirme kuralları için)
+  try {
+    var since = sh_addDays_(to, -90).slice(0, 7), agg = {};
+    um.forEach(function (u) { if (u[0] < since) return; var k = u[1] + '|' + u[2]; var a = agg[k] || (agg[k] = [u[1], u[2], 0, 0]); a[2] += u[4]; a[3] += u[5]; });
+    var top = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, b) { return b[2] - a[2]; }).slice(0, 80);
+    sh_setState_(ss, 'UNMATCHED_TOP', JSON.stringify(top));
+  } catch (e) {}
   var cube = { v: sh_now_(), from: from, to: to, camps: camps, rows: list, unmatched: um, diag: diag };
   var blob = Utilities.gzip(Utilities.newBlob(JSON.stringify(cube), 'application/json', 'report_cube.json'), 'report_cube.json.gz');
   var props2 = PropertiesService.getScriptProperties();
@@ -173,7 +224,7 @@ function cube_maybeRebuild_(ss, force) {
 function q_reportCube_(ss, p, cube) {
   var t0 = Date.now();
   var level = R_LEVELS[p.level] ? p.level : 'campaign';
-  var groupFields = R_LEVELS[level];
+  var groupFields = r_dims_(p, level);
   var hasAcct = groupFields.indexOf('account_id') >= 0;
   var metrics = R_METRICS.filter(function (m) { return hasAcct || !m.orig; });
   var acc = {};
@@ -211,7 +262,7 @@ function q_reportCube_(ss, p, cube) {
     var d = dims[r[1]];
     if (!d) continue;
     agg.add({
-      date: r[0], platform: d.platform, country: d.country, account_name: d.account_name, account_id: d.account_id,
+      date: r[0], platform: d.platform, country: d.country, tip: d.tip, account_name: d.account_name, account_id: d.account_id,
       campaign_name: d.campaign_name, campaign_id: d.campaign_id, currency: d.currency,
       spend: r[2], spend_usd: r[3], clicks: r[4], impressions: r[5], installs: r[6],
       ga_sessions: r[7], ga_purchases: r[8], ga_revenue_usd: r[9],
@@ -295,4 +346,31 @@ function ga4_rows_(ss, from, to, cb) {
     if (!b[4] && b[3] && cover[b[0][0] + '|' + b[3]]) continue;
     cb(b[0], b[1], b[2], b[3]);
   }
+}
+
+
+/** Config > Eşleştirme sekmesi: [Kaynak (GA4/Adjust/boş=hepsi), Kampanya adı kalıbı (metin ya da regex), Mecra, Hedef kampanya (boş = mecranın ilk kampanyası), Not] */
+var MAP_HEADER = ['Kaynak (GA4 / Adjust / boş)', 'Kampanya adı kalıbı (içerir; regex olabilir)', 'Mecra (Accounts > Platform)', 'Hedef kampanya adı (boş = mecradaki ilk kampanya)', 'Not'];
+function map_sheet_(ss) {
+  var sh = ss.getSheetByName('Eşleştirme');
+  if (!sh) {
+    sh = ss.insertSheet('Eşleştirme');
+    sh.getRange(1, 1, 1, MAP_HEADER.length).setValues([MAP_HEADER]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange(1, MAP_HEADER.length + 2).setValue('GA4 / Adjust kampanya adı reklam kampanyalarıyla eşleşmediğinde bu kurallar sırayla denenir. Durum > "Rapor önbelleğini yenile" ile hemen uygulanır.').setFontStyle('italic');
+  }
+  return sh;
+}
+function map_rules_(ss) {
+  var out = [];
+  try {
+    var vals = map_sheet_(ss).getDataRange().getValues();
+    for (var i = 1; i < vals.length; i++) {
+      var pat = String(vals[i][1] || '').trim(), plat = String(vals[i][2] || '').trim();
+      if (!pat || !plat) continue;
+      var re; try { re = new RegExp(pat, 'i'); } catch (e) { re = new RegExp(pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); }
+      out.push({ src: String(vals[i][0] || '').trim(), re: re, platform: plat, camp: String(vals[i][3] || '').trim() });
+    }
+  } catch (e) {}
+  return out;
 }

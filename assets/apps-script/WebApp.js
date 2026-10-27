@@ -9,14 +9,17 @@ function doGet(e) {
     var lt = HtmlService.createTemplateFromFile('Login');
     lt.baseUrl = ScriptApp.getService().getUrl() || '';
     lt.badToken = GK_ ? '1' : '';
-    return lt.evaluate().setTitle(APP_NAME).addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    lt.rid = RID_(e);
+    return lt.evaluate().setTitle(APP_NAME).setFaviconUrl('https://semtr.com/favicon.ico').addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
   var t = HtmlService.createTemplateFromFile('Index');
   // İlk veri (bootstrap) sayfaya gömülür → ayrı bir sunucu çağrısı beklenmez
+  t.reportId = RID_(e);
   t.guestKey = GUEST_ ? String(GK_).replace(/[^A-Za-z0-9_-]/g, '') : '';
   t.bootJson = apiBootstrap(null, GK_).replace(/</g, '\\u003c');
   return t.evaluate()
     .setTitle(APP_NAME)
+    .setFaviconUrl('https://semtr.com/favicon.ico')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
@@ -31,6 +34,13 @@ function include(name) {
  */
 var GK_ = '', GUEST_ = '';
 var ACCESS_DOMAIN = String(BRAND.AGENCY_DOMAIN || '').toLowerCase();
+/** Üst bardaki marka logosu (Brand.js > LOGO_URL); yoksa rapor adı yazılır. */
+function brandLogo_(sepClass) {
+  var esc = function (s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+  var sep = '<span class="' + sepClass + '"></span>';
+  if (BRAND.LOGO_URL) return sep + '<img class="blogo" src="' + esc(BRAND.LOGO_URL) + '" alt="' + esc(BRAND.REPORT_NAME) + '" style="height:18px;width:auto;display:block' + (BRAND.LOGO_INVERT === false ? '' : ';filter:brightness(0) invert(1)') + '">';
+  return sep + '<span class="bname" style="color:#fff;font-weight:600;font-size:14px;white-space:nowrap">' + esc(BRAND.REPORT_NAME) + '</span>';
+}
 function access_() {
   var v = viewer_();
   if (v && ACCESS_DOMAIN && v.split('@')[1] === ACCESS_DOMAIN) return true;
@@ -70,18 +80,23 @@ function apiBootstrap(_a, gk) { GK_ = gk || '';
     var s = sh_settings_(ss);
     var p = PropertiesService.getScriptProperties();
     var admin = isAdmin_(ss);
-    var accounts = sh_accounts_(ss).filter(function (a) { return a.active && (a.platform === 'Google Ads' || a.platform === 'Meta'); })
+    var adPlats = ['Google Ads', 'Meta'].concat(EXT_PLATFORMS);
+    var accounts = sh_accounts_(ss).filter(function (a) { return a.active && adPlats.indexOf(a.platform) >= 0; })
       .map(function (a) { return { key: a.platform + '|' + a.id, platform: a.platform, code: a.code, name: a.name, tip: a.tip }; });
+    var platforms = adPlats.filter(function (pl) { return accounts.some(function (a) { return a.platform === pl; }); });
     var countries = Object.keys(COUNTRIES).filter(function (c) { return !excludedMarket_(c); }).map(function (c) { return { code: c, name: COUNTRIES[c].tr }; });
     var out = {
       accounts: accounts,
+      platforms: platforms,
       countries: countries,
       ads: { levels: Object.keys(R_LEVELS), metrics: R_METRICS.map(function (m) { return { k: m.k, l: m.l, u: m.u, g: m.g, orig: !!m.orig, web: !!m.web }; }) },
       viewer: who_(), guest: !!GUEST_,
       appName: APP_NAME,
+      curSym: REPORT_SYM, cur: REPORT_CUR,
       showCountry: showCountry_(),
       campaignGroup: BRAND.CAMPAIGN_GROUP ? { inLabel: BRAND.CAMPAIGN_GROUP.IN_LABEL, outLabel: BRAND.CAMPAIGN_GROUP.OUT_LABEL, keyword: BRAND.CAMPAIGN_GROUP.KEYWORD, def: BRAND.CAMPAIGN_GROUP.DEFAULT || '' } : null,
       isAdmin: admin,
+      cpasLabel: BRAND.CPAS_LABEL || 'CPAS',
       startDate: s.START_DATE || '2025-01-01',
       today: sh_today_(),
       dataEnd: sh_yesterday_(),
@@ -94,6 +109,7 @@ function apiBootstrap(_a, gk) { GK_ = gk || '';
         guest: GUEST_DEPLOYMENT_ID ? 'https://script.google.com/macros/s/' + GUEST_DEPLOYMENT_ID + '/exec' : '' };
       out.secrets = { meta: !!p.getProperty('META_TOKEN'), adjust: !!p.getProperty('ADJUST_TOKEN'),
         adjustHint: p.getProperty('ADJUST_TOKEN') ? '…' + p.getProperty('ADJUST_TOKEN').slice(-4) + (p.getProperty('ADJUST_TOKEN_SAVED_AT') ? ' · ' + p.getProperty('ADJUST_TOKEN_SAVED_AT') : '') : '' };
+      Object.keys(EXT_TOKEN_PROP).forEach(function (k) { out.secrets[k] = !!p.getProperty(EXT_TOKEN_PROP[k]); });
       out.adjustApps = s.ADJUST_APP_TOKENS || '';
       out.adjustAccount = s.ADJUST_ACCOUNT_ID || '';
     }
@@ -103,6 +119,16 @@ function apiBootstrap(_a, gk) { GK_ = gk || '';
 
 /* ---------- rapor sorguları ---------- */
 
+/** Karşılaştırma: p.cmp = {from,to} varsa aynı sorgu o aralık için de çalışır → out.cmp = {from,to,columns,rows,totals,kpi} */
+function cmp_run_(p, fn) {
+  var out = fn(p), c = p.cmp;
+  if (!c || !c.from || !c.to || c.from > c.to || !out || !out.columns) return out;
+  var p2 = JSON.parse(JSON.stringify(p)); p2.from = c.from; p2.to = c.to; delete p2.cmp;
+  var o2 = fn(p2);
+  out.cmp = { from: c.from, to: c.to, columns: o2.columns, rows: o2.rows || [], totals: o2.totals || null };
+  if (o2.kpi) out.cmp.kpi = o2.kpi;
+  return out;
+}
 function apiQuery(paramsJson, gk) { GK_ = gk || '';
   if (!access_()) return JSON.stringify({ ok: false, error: 'Bu rapora erişim yetkiniz yok.' });
   var p = JSON.parse(paramsJson);
@@ -119,7 +145,7 @@ function apiQuery(paramsJson, gk) { GK_ = gk || '';
       (!(p.filters && p.filters.pick) || p.filters.pick.fields.every(function (k) { return ['country', 'platform', 'account_id', 'campaign_id'].indexOf(k) >= 0; }));
     // 2) küp: önceden eşleştirilmiş tek dosya (hızlı)  3) yoksa canlı hesap (ad seviyesi / küp henüz kurulmadıysa)
     var cube = cubeOk ? cube_load_() : null;
-    return cube ? q_reportCube_(ss, p, cube) : q_report_(ss, p);
+    return cmp_run_(p, function (q) { return cube ? q_reportCube_(ss, q, cube) : q_report_(ss, q); });
   });
   if (out.indexOf('{"ok":true') === 0) qcache_put_(key, out);
   return out;
@@ -209,7 +235,8 @@ function apiStatus(_a, gk) { GK_ = gk || '';
     var ga4x = { mode: ga4External_(ss) ? 'external' : 'internal' };
     ['GA4X_LAST_RUN', 'GA4X_LAST_REFRESH', 'GA4X_STATUS'].forEach(function (k) { ga4x[k] = sh_getState_(ss, k); });
     var pp = PropertiesService.getScriptProperties();
-    return { queue: byS, files: files, logs: logs, fxLast: fxLast, gads: gads, gads2: gads2, ga4x: ga4x, cubeAt: pp.getProperty('CUBE_BUILT_AT') || '' };
+    return { queue: byS, files: files, logs: logs, fxLast: fxLast, gads: gads, gads2: gads2, ga4x: ga4x, cubeAt: pp.getProperty('CUBE_BUILT_AT') || '',
+      bing: sh_getState_(ss, 'BING_LAST_PUSH') };
   });
 }
 
@@ -220,42 +247,62 @@ function apiSaveSecrets(json, gk) { GK_ = gk || '';
     var p = PropertiesService.getScriptProperties();
     var ss = cfg_();
     var started = [], needAdj = false;
-    if (o.meta) {
+    // Her alan ayrı denenir: biri hatalıysa diğerleri yine kaydedilir
+    function step(label, fn) {
+      try { var m = fn(); if (m) started.push('✓ ' + m); }
+      catch (e) { started.push('⚠ ' + label + ': ' + ((e && e.message) || e) + ' (kaydedilmedi)'); }
+    }
+    if (o.meta && String(o.meta).trim()) step('Meta', function () {
       var had = !!p.getProperty('META_TOKEN');
-      // önce token doğrulama, sonra kaydet
       var s = sh_settings_(ss);
       var me = fetchJson_('https://graph.facebook.com/' + (s.META_API_VERSION || 'v23.0') + '/me?access_token=' + encodeURIComponent(o.meta.trim()));
       p.setProperty('META_TOKEN', o.meta.trim());
-      started.push('Meta token geçerli (' + (me.name || me.id) + ')');
       if (!had) enqueueBackfill_(ss, ['meta']);
-    }
-    if (o.adjustAccount != null && String(o.adjustAccount).trim() !== String(sh_settings_(ss).ADJUST_ACCOUNT_ID || '')) {
+      return 'Meta token geçerli (' + (me.name || me.id) + ')';
+    });
+    if (o.adjustAccount != null && String(o.adjustAccount).trim() !== String(sh_settings_(ss).ADJUST_ACCOUNT_ID || '')) step('Adjust hesap ID', function () {
       sh_setSetting_(ss, 'ADJUST_ACCOUNT_ID', String(o.adjustAccount).trim());
-      started.push('Adjust hesap ID kaydedildi (' + String(o.adjustAccount).trim() + ')');
+      var msg = 'Adjust hesap ID kaydedildi (' + String(o.adjustAccount).trim() + ')';
       if (!o.adjust && p.getProperty('ADJUST_TOKEN')) {
-        started.push(adjust_testToken_(ss, p.getProperty('ADJUST_TOKEN')).summary);
+        msg += ' · ' + adjust_testToken_(ss, p.getProperty('ADJUST_TOKEN')).summary;
         readQueue_(ss).forEach(function (it) { if (it.source === 'adjust' && it.status === 'error') setQueueRow_(ss, it, 'pending', 0, ''); });
       }
-    }
-    if (o.adjust) {
+      return msg;
+    });
+    if (o.adjustApps != null && String(o.adjustApps).trim() !== '') step('Adjust app token', function () {
+      sh_setSetting_(ss, 'ADJUST_APP_TOKENS', o.adjustApps.trim());
+      if (p.getProperty('ADJUST_TOKEN')) needAdj = true;
+      return 'Adjust app token(lar) kaydedildi';
+    });
+    if (o.adjust && String(o.adjust).trim()) step('Adjust', function () {
       var at = o.adjust.trim();
       var t = adjust_testToken_(ss, at); // önce doğrula (hatalıysa kaydetmez)
       p.setProperties({ ADJUST_TOKEN: at, ADJUST_TOKEN_SAVED_AT: sh_now_() });
-      started.push('Adjust token kaydedildi (…' + at.slice(-4) + ') · ' + t.summary);
-      // hata ile durmuş Adjust işlerini yeniden dene
       readQueue_(ss).forEach(function (it) { if (it.source === 'adjust' && it.status === 'error') setQueueRow_(ss, it, 'pending', 0, ''); });
-      if (sh_settings_(ss).ADJUST_APP_TOKENS || o.adjustApps) needAdj = true;
-    }
-    if (o.adjustApps != null && o.adjustApps !== '') {
-      sh_setSetting_(ss, 'ADJUST_APP_TOKENS', o.adjustApps.trim());
-      started.push('Adjust app token(lar) kaydedildi');
-      if (p.getProperty('ADJUST_TOKEN')) needAdj = true;
-    }
-    if (needAdj) {
-      started.push('Adjust backfill: ' + enqueueBackfill_(ss, ['adjust']) + ' iş kuyrukta');
+      if (sh_settings_(ss).ADJUST_APP_TOKENS) needAdj = true;
+      return 'Adjust token kaydedildi (…' + at.slice(-4) + ') · ' + t.summary;
+    });
+    Object.keys(EXT_TOKEN_PROP).forEach(function (k) {
+      if (!o[k] || !String(o[k]).trim()) return;
+      step(EXT_SOURCES[k], function () {
+        var tok = String(o[k]).trim();
+        var had2 = !!p.getProperty(EXT_TOKEN_PROP[k]);
+        var msg = ext_testToken_(ss, k, tok); // önce doğrula (hatalıysa kaydetmez)
+        p.setProperty(EXT_TOKEN_PROP[k], tok);
+        readQueue_(ss).forEach(function (it) { if (it.source === k && it.status === 'error') setQueueRow_(ss, it, 'pending', 0, ''); });
+        if (!had2) msg += ' · backfill: ' + enqueueBackfill_(ss, [k]) + ' iş kuyrukta';
+        return msg;
+      });
+    });
+    if (needAdj) step('Adjust backfill', function () {
+      var n = enqueueBackfill_(ss, ['adjust']);
       enqueueBackfill_(ss, ['adjust_ag'], String(sh_settings_(ss).AG_START_DATE || '2026-01-01'));
-    }
-    return started.join(' · ') || 'Değişiklik yok';
+      return 'Adjust backfill: ' + n + ' iş kuyrukta';
+    });
+    var saved = {};
+    ['META_TOKEN', 'ADJUST_TOKEN'].concat(Object.keys(EXT_TOKEN_PROP).map(function (k) { return EXT_TOKEN_PROP[k]; }))
+      .forEach(function (k) { saved[k] = !!p.getProperty(k); });
+    return { message: started.join('\n') || 'Değişiklik yok', saved: saved };
   });
 }
 
@@ -272,7 +319,7 @@ function apiSyncNow(_a, gk) { GK_ = gk || '';
   return api_(function () {
     requireAdmin_();
     var ss = cfg_();
-    enqueueRecent_(ss, ['meta', 'adjust', 'adjust_ag', 'ga4', 'ga4_ag']);
+    enqueueRecent_(ss, ['meta', 'adjust', 'adjust_ag', 'ga4', 'ga4_ag'].concat(Object.keys(EXT_SOURCES)));
     var r = runSync();
     return r === 'busy' ? 'Senkron zaten çalışıyor; birkaç dakika içinde tamamlanır.' : r;
   });
@@ -486,3 +533,84 @@ function guests_sync_(ss) {
 
 /** Bir kez editörden çalıştırılır: e-posta gönderme iznini onaylatır. */
 function mailYetkisi() { MailApp.getRemainingDailyQuota(); return 'ok'; }
+
+
+/* ---------- kayıtlı rapor görünümleri (kişi başına, Config > Views) ---------- */
+var VIEW_HDR = ['E-posta', 'Rapor adı', 'Ayarlar (JSON)', 'Güncelleme', 'Görünürlük', 'Paylaşılan kişiler', 'ID'];
+function views_sheet_(ss) {
+  var sh = ss.getSheetByName('Views');
+  if (!sh) { sh = ss.insertSheet('Views'); sh.setFrozenRows(1); }
+  if (String(sh.getRange(1, 7).getValue()) !== 'ID') sh.getRange(1, 1, 1, VIEW_HDR.length).setValues([VIEW_HDR]).setFontWeight('bold');
+  return sh;
+}
+function views_rows_(sh) {
+  var vals = sh.getRange(1, 1, Math.max(1, sh.getLastRow()), VIEW_HDR.length).getValues();
+  for (var i = 1; i < vals.length; i++) {
+    if (!String(vals[i][0] || '')) continue;
+    if (!String(vals[i][6] || '')) { vals[i][6] = Utilities.getUuid().replace(/-/g, '').slice(0, 10); sh.getRange(i + 1, 7).setNumberFormat('@').setValue(vals[i][6]); }
+    if (!String(vals[i][4] || '')) vals[i][4] = 'private';
+  }
+  return vals;
+}
+function views_emails_(s) {
+  return String(s || '').toLowerCase().split(/[\s,;]+/).filter(function (x) { return x; });
+}
+function views_kind_(r, me) {
+  if (String(r[0]).toLowerCase() === me) return 'mine';
+  if (String(r[4]) === 'public') return 'public';
+  return views_emails_(r[5]).indexOf(me) >= 0 ? 'shared' : '';
+}
+function views_list_(ss, me) {
+  var vals = views_rows_(views_sheet_(ss)), out = [];
+  for (var i = 1; i < vals.length; i++) {
+    if (!String(vals[i][0] || '')) continue;
+    var kind = views_kind_(vals[i], me);
+    if (!kind) continue;
+    var v = {}; try { v = JSON.parse(vals[i][2] || '{}'); } catch (e) {}
+    out.push({ id: String(vals[i][6]), name: String(vals[i][1]), owner: String(vals[i][0]).toLowerCase(), kind: kind, vis: String(vals[i][4] || 'private'),
+      shared: kind === 'mine' ? views_emails_(vals[i][5]).join(', ') : '', view: v, updated: String(vals[i][3]) });
+  }
+  out.sort(function (a, b) { return a.name.localeCompare(b.name, 'tr'); });
+  var g = GUEST_DEPLOYMENT_ID ? 'https://script.google.com/macros/s/' + GUEST_DEPLOYMENT_ID + '/exec' : '';
+  var main = ''; try { main = ScriptApp.getService().getUrl() || ''; } catch (e) {}
+  return { items: out, url: GUEST_ ? g : main, guest: g, me: me };
+}
+function apiViews(_a, gk) { GK_ = gk || '';
+  return api_(function () { var me = who_(); return me ? views_list_(cfg_(), me) : { items: [], url: '', guest: '' }; });
+}
+function apiSaveView(json, gk) { GK_ = gk || '';
+  return api_(function () {
+    var me = who_();
+    if (!me) throw new Error('Rapor kaydetmek için giriş yapılmış olmalı.');
+    var o = JSON.parse(json), ss = cfg_(), sh = views_sheet_(ss);
+    var lock = LockService.getScriptLock(); lock.waitLock(20000);
+    try {
+      var vals = views_rows_(sh), row = -1, i;
+      if (o.id) {
+        for (i = 1; i < vals.length; i++) if (String(vals[i][6]) === String(o.id)) { row = i + 1; break; }
+        if (row < 0) throw new Error('Rapor bulunamadı (silinmiş olabilir).');
+        var owner = String(vals[row - 1][0]).toLowerCase();
+        if (owner !== me) throw new Error('Bu rapor ' + owner + ' tarafından kaydedildi; sadece sahibi değiştirebilir ya da silebilir.');
+      }
+      if (o.del) { if (row > 0) sh.deleteRow(row); return views_list_(ss, me); }
+      var name = String(o.name || '').trim().slice(0, 80);
+      if (!name) throw new Error('Rapor adı boş olamaz.');
+      if (row < 0) for (i = 1; i < vals.length; i++) if (String(vals[i][0]).toLowerCase() === me && String(vals[i][1]) === name) { row = i + 1; break; }
+      var vis = o.vis === 'public' ? 'public' : 'private';
+      var shared = vis === 'public' ? [] : views_emails_(o.shared).filter(function (e) { return e !== me; });
+      var bad = shared.filter(function (e) { return !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e); });
+      if (bad.length) throw new Error('Geçersiz e-posta: ' + bad.join(', '));
+      if (shared.length > 50) throw new Error('En fazla 50 kişiyle paylaşılabilir.');
+      var js = JSON.stringify(o.view || {});
+      if (js.length > 45000) throw new Error('Rapor ayarları çok büyük.');
+      var id = row > 0 ? String(vals[row - 1][6]) : Utilities.getUuid().replace(/-/g, '').slice(0, 10);
+      var rec = [me, name, js, sh_now_(), vis, shared.join(', '), id];
+      if (row > 0) sh.getRange(row, 1, 1, rec.length).setNumberFormat('@').setValues([rec]);
+      else sh.getRange(sh.getLastRow() + 1, 1, 1, rec.length).setNumberFormat('@').setValues([rec]);
+      var res = views_list_(ss, me); res.saved = id; return res;
+    } finally { lock.releaseLock(); }
+  });
+}
+
+/** Paylaşılan rapor linki: ?r=<rapor ID> */
+function RID_(e) { return String((e && e.parameter && e.parameter.r) || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 20); }

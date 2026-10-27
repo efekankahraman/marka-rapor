@@ -153,6 +153,39 @@ function main(budget) {
       sh_setState_(ss, PREFIX + 'AG_CURSOR', agc);
     }
   }
+  // 1b2) teşhis (bir kez): Criteo trafiğinin GA4'teki kaynak / kampanya adları
+  if (sh_getState_(ss, PREFIX + 'CRITEO_DIAG') !== '1') {
+    try {
+      var gp = String(s.GA4_GLOBAL_PROPERTY || '').trim();
+      var rr = AnalyticsData.Properties.runReport({ dateRanges: [{ startDate: sh_addDays_(today, -90), endDate: today }],
+        dimensions: [{ name: 'sessionSource' }, { name: 'sessionMedium' }, { name: 'sessionCampaignName' }], metrics: [{ name: 'sessions' }, { name: 'ecommercePurchases' }, { name: 'purchaseRevenue' }],
+        dimensionFilter: { filter: { fieldName: 'sessionSource', stringFilter: { value: 'criteo', matchType: 'CONTAINS', caseSensitive: false } } },
+        orderBys: [{ metric: { metricName: 'sessions' }, desc: true }], limit: 25 }, 'properties/' + gp);
+      sh_log_(ss, 'ga4x', 'INFO', 'Criteo teşhisi (GA4, son 90 gün): ' + ((rr.rows || []).map(function (r) {
+        return r.dimensionValues.map(function (x) { return x.value; }).join(' / ') + ' = ' + r.metricValues.map(function (x) { return x.value; }).join(' · ');
+      }).join(' | ') || 'criteo kaynaklı oturum yok'));
+    } catch (e) { sh_log_(ss, 'ga4x', 'ERROR', 'Criteo teşhisi: ' + (e.message || e)); }
+    sh_setState_(ss, PREFIX + 'CRITEO_DIAG', '1');
+  }
+  // 1c) Web sekmesi verisi (ga4_web): günlük yenileme + START_DATE'e kadar aylık backfill
+  var wLast = sh_getState_(ss, PREFIX + 'WEB_LAST_REFRESH');
+  if (sh_dailyDue_(wLast, +s.DAILY_REFRESH_HOUR || 3) && Date.now() - t0 < LIMIT) {
+    try { ga4_webSync_(ss, sh_addDays_(today, -(+s.GA4_LOOKBACK_DAYS || 3)), today); sh_setState_(ss, PREFIX + 'WEB_LAST_REFRESH', sh_now_()); }
+    catch (e) { sh_log_(ss, 'ga4x', 'ERROR', 'web yenileme: ' + (e.message || e)); }
+  }
+  var wc = sh_getState_(ss, PREFIX + 'WEB_CURSOR') || today.slice(0, 7);
+  while (wc >= start.slice(0, 7) && Date.now() - t0 < LIMIT * 0.7) {
+    var wFrom = wc + '-01', wTo = sh_monthEnd_(wFrom);
+    if (wTo > today) wTo = today;
+    if (wFrom < start) wFrom = start;
+    try {
+      sh_setState_(ss, PREFIX + 'PHASE', 'web backfill ' + wFrom + ' başladı ' + sh_now_());
+      var wn = ga4_webSync_(ss, wFrom, wTo);
+      sh_log_(ss, 'ga4x', 'INFO', 'web ' + wFrom + '→' + wTo + ': ' + wn + ' satır');
+    } catch (e) { sh_log_(ss, 'ga4x', 'ERROR', 'web ' + wFrom + ': ' + (e.message || e)); break; }
+    wc = sh_addDays_(wFrom.slice(0, 7) + '-01', -1).slice(0, 7);
+    sh_setState_(ss, PREFIX + 'WEB_CURSOR', wc);
+  }
   // 2) Backfill (property başına ay imleci)
   var pending = 0;
   for (var i = 0; i < props.length; i++) {

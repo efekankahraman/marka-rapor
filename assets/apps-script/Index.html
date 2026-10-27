@@ -10,10 +10,14 @@
 </head>
 <body>
   <header class="top">
-    <div class="brand"><svg aria-label="SEM" xmlns="http://www.w3.org/2000/svg" width="87" height="31" viewBox="0 0 87 31" fill="none"><path d="M3.46743 21.1413C5.56063 23.321 8.80964 25.1457 12.9005 25.1457C16.3725 25.1457 18.0652 23.4984 18.0652 21.8057C18.0652 19.5805 15.4851 18.8251 12.0586 18.0243C7.20788 16.9094 0.978344 15.5761 0.978344 8.94615C0.978344 4.00438 5.2512 0 12.2361 0C16.9549 0 20.8683 1.42429 23.8079 4.14089L20.2904 8.76868C17.8878 6.54352 14.6842 5.51967 11.7902 5.51967C8.8961 5.51967 7.43086 6.76649 7.43086 8.54571C7.43086 10.5479 9.92449 11.1713 13.351 11.9722C18.2472 13.0825 24.4768 14.5523 24.4768 21.1413C24.4768 26.57 20.6044 30.6654 12.5956 30.6654C6.89845 30.6654 2.80307 28.7496 0 25.9466L3.47198 21.1413H3.46743Z" fill="#06AEEF"></path><path d="M28.7451 30.1288V0.446289H49.7499V5.87495H35.0611V12.3275H49.4359V17.7561H35.0611V24.6546H49.7499V30.1288H28.7451Z" fill="#06AEEF"></path><path d="M80.5021 30.1288V8.76903L72.1339 30.1288H69.3763L61.008 8.76903V30.1288H54.6875V0.446289H63.5426L70.7505 18.9574L77.963 0.446289H86.8636V30.1288H80.4975H80.5021Z" fill="#06AEEF"></path></svg><span class="bsep"></span><span><?= APP_NAME ?></span></div>
-    <span class="upd" id="dataNote" title="Veriler bugünü içermez; her sabah 03:00'te (İstanbul) dün dahil güncellenir.">ⓘ Bugünün verisini içermez · her gün 03:00'te güncellenir</span>
+    <div class="brand"><svg aria-label="SEM" xmlns="http://www.w3.org/2000/svg" width="87" height="31" viewBox="0 0 87 31" fill="none"><path d="M3.46743 21.1413C5.56063 23.321 8.80964 25.1457 12.9005 25.1457C16.3725 25.1457 18.0652 23.4984 18.0652 21.8057C18.0652 19.5805 15.4851 18.8251 12.0586 18.0243C7.20788 16.9094 0.978344 15.5761 0.978344 8.94615C0.978344 4.00438 5.2512 0 12.2361 0C16.9549 0 20.8683 1.42429 23.8079 4.14089L20.2904 8.76868C17.8878 6.54352 14.6842 5.51967 11.7902 5.51967C8.8961 5.51967 7.43086 6.76649 7.43086 8.54571C7.43086 10.5479 9.92449 11.1713 13.351 11.9722C18.2472 13.0825 24.4768 14.5523 24.4768 21.1413C24.4768 26.57 20.6044 30.6654 12.5956 30.6654C6.89845 30.6654 2.80307 28.7496 0 25.9466L3.47198 21.1413H3.46743Z" fill="#06AEEF"></path><path d="M28.7451 30.1288V0.446289H49.7499V5.87495H35.0611V12.3275H49.4359V17.7561H35.0611V24.6546H49.7499V30.1288H28.7451Z" fill="#06AEEF"></path><path d="M80.5021 30.1288V8.76903L72.1339 30.1288H69.3763L61.008 8.76903V30.1288H54.6875V0.446289H63.5426L70.7505 18.9574L77.963 0.446289H86.8636V30.1288H80.4975H80.5021Z" fill="#06AEEF"></path></svg><?!= brandLogo_('bsep') ?></div>
     <nav class="tabs hidden" id="tabs">
       <button data-tab="ads" class="on">Rapor</button>
+      <button data-tab="web">Web</button>
+      <button data-tab="app">App</button>
+      <button data-tab="creative">Kreatif</button>
+      <? if ((BRAND.CPAS_ACCOUNTS || []).length) { ?><button data-tab="cpas"><?= BRAND.CPAS_LABEL || 'CPAS' ?></button><? } ?>
+      <button data-tab="targets">Hedefler</button>
       <button data-tab="status" id="tabStatus" class="hidden">Durum</button>
     </nav>
     <div class="spacer"></div>
@@ -23,8 +27,8 @@
   <div id="app" class="hidden">
     <section class="filters" id="filters">
       <div class="f-group">
-        <label>Tarih</label>
         <div class="row">
+          <label class="inl-l">Tarih</label>
           <input type="date" id="fFrom"> <span class="muted">–</span> <input type="date" id="fTo">
           <select id="fPreset">
             <option value="">Hazır aralık…</option>
@@ -37,9 +41,13 @@
             <option value="2025">2025</option>
             <option value="all">Tümü (2025-01'den)</option>
           </select>
+          <label class="cmpt" title="Kartlarda ve tablo hücrelerinde değişim yüzdesi gösterilir"><input type="checkbox" id="cmpOn"> Karşılaştır</label>
+          <select id="cmpMode" class="hidden"><option value="prev">Önceki dönem</option><option value="yoy">Geçen yıl aynı dönem</option><option value="custom">Özel aralık…</option></select>
+          <span id="cmpCustom" class="hidden"><input type="date" id="cmpFrom"> <span class="muted">–</span> <input type="date" id="cmpTo"></span>
+          <span class="muted" id="cmpLbl"></span>
+          <span class="upd datenote" id="dataNote">ⓘ Bugünün verisini içermez · her gece 03:00 sonrası güncellenir</span>
         </div>
       </div>
-      <div class="f-group grow"><label>Filtreler</label><div class="fbar" id="fBar"></div></div>
       <div class="hidden"><button id="btnApply">Uygula</button></div>
     </section>
 
@@ -64,6 +72,8 @@
         <div class="seg" id="adsLevel"></div>
         <div class="seg" id="adsGrain"></div>
         <div class="grpchips" id="adsGroups"></div>
+        <select id="viewSel" title="Kayıtlı görünüm"></select>
+        <button id="btnView" title="Kolonlar, boyutlar, özel metrikler">⚙ Görünüm</button>
         <label class="switch"><input type="checkbox" id="adsIds"><span class="slider"></span><span class="sw-l">ID'leri göster</span></label>
         <div class="tb-right">
           <span class="muted small" id="selInfo"></span>
@@ -71,13 +81,125 @@
           <button id="adsExport" class="accent" title="Google Sheets'e aktar">Sheets'e aktar</button>
         </div>
       </div>
+      <div class="f-group adsf"><div class="fbar" id="fBar"></div></div>
+      <div class="goals" id="adsGoals"></div>
       <div class="kpis" id="adsKpis"></div>
       <div class="warn" id="adsWarn"></div>
       <div class="tablewrap" id="adsTable"></div>
       <details class="tabledetails hidden" id="unmatchedBox"><summary id="unmatchedSum">Eşleşme</summary><div id="unmatchedBody"></div></details>
     </section>
 
+    <!-- KREATİF -->
+    <section class="panel hidden" id="p-creative">
+      <div class="toolbar">
+        <div class="seg" id="crPlat"></div>
+        <div class="seg" id="crStatus"></div>
+        <div class="seg" id="crMerge" title="Aynı içerikli kreatifleri (farklı boyutlar, farklı reklam grupları) tek kartta birleştir"></div>
+        <div class="seg" id="crSrc" title="Google Ads: reklamverenin eklediği / Google'ın otomatik oluşturduğu"></div>
+        <select id="crSort">
+          <option value="s">Sırala: Harcama</option><option value="v">Sırala: Satış tutarı</option><option value="roas">Sırala: ROAS</option>
+          <option value="cv">Sırala: Dönüşüm</option><option value="ctr">Sırala: CTR</option><option value="i">Sırala: Gösterim</option><option value="cpa">Sırala: CPA (düşükten)</option><option value="f">Sırala: En yeni</option>
+        </select>
+        <input type="text" id="crQ" class="crq" placeholder="Kreatif / kampanya ara…">
+        <div class="tb-right"><div class="seg" id="crView"></div><button id="crCsv">CSV</button></div>
+      </div>
+      <div class="muted small appnote" id="crNote"></div>
+      <div class="kpis" id="crKpis"></div>
+      <div class="warn" id="crWarn"></div>
+      <div id="crGrid"></div>
+      <div class="row" style="justify-content:center;margin-top:12px"><button id="crMore" class="hidden">Daha fazla göster</button></div>
+    </section>
+
+    <!-- TRENDYOL CPAS -->
+    <section class="panel hidden" id="p-cpas">
+      <div class="cp-head">
+        <div><h2><?= BRAND.CPAS_LABEL || 'CPAS' ?></h2><div class="muted small">Meta Collaborative Ads hesabı. Sadece Meta panel verisi (GA4 / Adjust yok); satış = iş ortağının Meta'ya bildirdiği satın almalar. Önceki dönemle kıyas için üstteki "Karşılaştır"ı aç.</div></div>
+      </div>
+      <div class="kpis" id="cpKpis"></div>
+      <div class="webrow">
+        <div class="chartcard appchart grow tsbox"><div class="tschips" id="cpasTsChips"></div><div class="tscanvas"><canvas id="cpasTs"></canvas></div></div>
+        <div class="card funnel"><h3>Huni</h3><div id="cpFunnel"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h3>Kampanyalar</h3><div id="cpCamps"></div></div>
+        <div class="card"><h3>Haftanın günleri <span class="muted small">(ROAS ve harcama)</span></h3><div class="cp-dow"><canvas id="cpDow"></canvas></div></div>
+      </div>
+      <div class="card cp-crc"><h3>En çok satış getiren kreatifler</h3><div id="cpCr"></div></div>
+      <div class="toolbar">
+        <span class="muted small">Tablo</span><div class="seg" id="cpLevel"></div><div class="seg" id="cpGrain"></div>
+        <div class="tb-right"><button id="cpCsv">CSV</button><button id="cpExport" class="accent">Sheets'e aktar</button></div>
+      </div>
+      <div class="warn" id="cpWarn"></div>
+      <div class="tablewrap" id="cpTable"></div>
+    </section>
+
+    <!-- WEB (GA4) -->
+    <section class="panel hidden" id="p-web">
+      <div class="toolbar">
+        <span class="muted small">Kırılım</span><div class="seg" id="webDims"></div>
+        <div class="seg" id="webGrain"></div>
+        <div class="tb-right">
+          <button id="webCsv">CSV</button>
+          <button id="webExport" class="accent">Sheets'e aktar</button>
+        </div>
+      </div>
+      <div class="muted small appnote">Kaynak: GA4 (sadece web). Reklam harcaması tüm mecraların toplamıdır; Blended ROAS = web geliri / toplam reklam harcaması. Tarih filtresi uygulanır.</div>
+      <div class="kpis" id="webKpis"></div>
+      <div class="webrow">
+        <div class="chartcard appchart grow tsbox"><div class="tschips" id="webTsChips"></div><div class="tscanvas"><canvas id="webTs"></canvas></div><canvas id="webChart" class="hidden"></canvas></div>
+        <div class="card funnel"><h3>Dönüşüm hunisi</h3><div id="webFunnel"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h3>Kanal</h3><div id="webCh"></div></div>
+        <div class="card"><h3>Cihaz</h3><div id="webDev"></div></div>
+      </div>
+      <div class="warn" id="webWarn"></div>
+      <div class="tablewrap" id="webTable"></div>
+    </section>
+
+    <!-- APP (Adjust) -->
+    <section class="panel hidden" id="p-app">
+      <div class="toolbar">
+        <span class="muted small">Kırılım</span><div class="seg" id="appDims"></div>
+        <div class="seg" id="appGrain"></div>
+        <div class="tb-right">
+          <button id="appCsv">CSV</button>
+          <button id="appExport" class="accent">Sheets'e aktar</button>
+        </div>
+      </div>
+      <div class="muted small appnote">Kaynak: Adjust (app içi). Tarih filtresi uygulanır; mecra / hesap filtreleri bu sekmede kullanılmaz. Retention oranları install ağırlıklıdır.</div>
+      <div class="kpis" id="appKpis"></div>
+      <div class="chartcard appchart tsbox"><div class="tschips" id="appTsChips"></div><div class="tscanvas"><canvas id="appTs"></canvas></div><canvas id="appChart" class="hidden"></canvas></div>
+      <div class="grid2">
+        <div class="card"><h3>OS</h3><div id="appOs"></div></div>
+        <div class="card"><h3>Organik / Ücretli</h3><div id="appNet"></div></div>
+      </div>
+      <div class="card appfn hidden" id="appFnCard"><h3>App hunisi</h3><div id="appFunnel"></div></div>
+      <div class="warn" id="appWarn"></div>
+      <div class="tablewrap" id="appTable"></div>
+    </section>
+
     <!-- DURUM -->
+    <section class="panel hidden" id="p-targets">
+      <div class="vh">Seçili tarih aralığında hedefin neresindesin</div>
+      <div class="goals" id="tgGoals"></div>
+      <div class="tcard">
+        <h3>Hedef ekle / düzenle</h3>
+        <p class="muted small">Aylık hedef gir; Rapor ve Hedefler sekmelerinde seçili tarih aralığına göre (gün oranlı) hedefin neresinde olduğun kartlarda görünür. Satış ve session rakamları reklam kaynaklıdır (kampanyalarla eşleşen GA4 + Adjust). Boş bırakılan alanın hedefi silinir.</p>
+        <div class="row tsel"><label class="inl-l">Ay</label><input type="month" id="tMonth"><label class="inl-l">Kapsam</label><select id="tScope"></select></div>
+        <div class="tgrid">
+          <label>Satış tutarı (<span class="tsym"></span>)<input type="number" id="t_revenue" min="0" step="any" placeholder="—"></label>
+          <label>Satış adedi<input type="number" id="t_purchases" min="0" step="any" placeholder="—"></label>
+          <label>Session<input type="number" id="t_sessions" min="0" step="any" placeholder="—"></label>
+          <label>Harcama / cost (<span class="tsym"></span>)<input type="number" id="t_cost" min="0" step="any" placeholder="—"></label>
+        </div>
+        <div class="row"><button id="tSave" class="primary">Kaydet</button><button id="tCopy">Önceki aydan kopyala</button><span class="msg" id="tMsg"></span></div>
+      </div>
+      <div class="tcard">
+        <h3>Girilen hedefler</h3>
+        <div id="tList"></div>
+      </div>
+    </section>
     <section class="panel hidden" id="p-status">
       <div class="grid2">
         <div class="card">
@@ -98,6 +220,16 @@
           <div class="row"><input type="text" id="inAdjAcc" placeholder="ör. 12345"></div>
           <label>Adjust app token(lar)</label>
           <div class="row"><input type="text" id="inAdjApps" placeholder="abc123xyz,def456..."></div>
+          <label>TikTok access token <span id="stTiktok" class="pill"></span> <span class="hint" title="TikTok for Business Developers > uygulama (Reporting izni) > reklamveren yetkilendirmesi ile alınan uzun ömürlü token">?</span></label>
+          <div class="row"><input type="password" id="inTiktok" placeholder="Access-Token"></div>
+          <label>Yandex Direct OAuth token <span id="stYandex" class="pill"></span> <span class="hint" title="oauth.yandex.com uygulaması (Direct API erişimi) ile ajans hesabından alınan token. Hesap ID = Client-Login">?</span></label>
+          <div class="row"><input type="password" id="inYandex" placeholder="OAuth token"></div>
+          <label>RTB House API token <span id="stRtbhouse" class="pill"></span></label>
+          <div class="row"><input type="password" id="inRtbhouse" placeholder="Panel > API token"></div>
+          <label>Criteo client_id:client_secret <span id="stCriteo" class="pill"></span> <span class="hint" title="developers.criteo.com > uygulama (Analytics okuma) > marka hesabının onayı. İkisini iki nokta ile birleştirip yapıştırın">?</span></label>
+          <div class="row"><input type="password" id="inCriteo" placeholder="client_id:client_secret"></div>
+          <label>Yango Ads API token <span id="stYango" class="pill"></span> <span class="hint" title="space.yango.com > Agency > Access tokens">?</span></label>
+          <div class="row"><input type="password" id="inYango" placeholder="Yango API token"></div>
           <button class="primary" id="btnSecrets">Kaydet</button> <button id="btnAdjTest">Adjust token'ını test et</button>
           <div class="msg" id="secMsg"></div>
         </div>
@@ -110,6 +242,11 @@
           <button id="btnRetry">Hataları yeniden dene</button>
           <button data-bf="meta">Meta backfill</button>
           <button data-bf="adjust">Adjust backfill</button>
+          <button data-bf="tiktok">TikTok backfill</button>
+          <button data-bf="yandex">Yandex backfill</button>
+          <button data-bf="rtbhouse">RTB House backfill</button>
+          <button data-bf="criteo">Criteo backfill</button>
+          <button data-bf="yango">Yango backfill</button>
           <button id="btnCube">Rapor önbelleğini yenile</button>
           <button id="btnRefreshStatus">↻</button>
         </div>
@@ -142,11 +279,70 @@
     </div>
   </div>
 
+  <!-- Görünüm düzenleyici -->
+  <div class="modal hidden" id="vModal">
+    <div class="modal-card wide">
+      <h3>Görünüm ve kayıtlı raporlar</h3>
+      <p class="muted small">Kolonları seç ve sırala, boyutları değiştir, kendi metriğini ekle; değişiklikler hemen uygulanır. Aşağıdan filtreler ve tarih aralığıyla birlikte rapor olarak kaydedebilirsin: özel (sen + paylaştığın kişiler) ya da herkese açık (rapora bakan herkes).</p>
+      <div class="vgrid">
+        <div>
+          <div class="vh">Kolonlar <span class="muted small">(✓ = görünür, oklarla sırala)</span></div>
+          <div class="vlist" id="vCols"></div>
+        </div>
+        <div>
+          <div class="vh">Boyutlar <span class="muted small" id="vLvl"></span></div>
+          <div class="vlist short" id="vDims"></div>
+          <div class="vh">Özel metrik</div>
+          <div id="vCustom"></div>
+          <input type="text" id="cmName" placeholder="Ad (ör. Sipariş başı maliyet)">
+          <textarea id="cmF" rows="2" placeholder="Formül, ör. spend_usd / tot_purchases   (+ − × ÷ ve parantez)"></textarea>
+          <div class="cmchips" id="cmChips"></div>
+          <div class="row"><select id="cmU"><option value="num">Sayı</option><option value="usd">Para</option><option value="pct">Yüzde</option><option value="x">Kat (x)</option></select><button id="cmAdd">Metriği ekle</button></div>
+          <div class="msg" id="cmMsg"></div>
+        </div>
+      </div>
+      <div class="vsave">
+        <div class="vh">Rapor olarak kaydet <span class="muted small" id="vOwner"></span></div>
+        <div class="row">
+          <input type="text" id="vName" placeholder="Rapor adı (ör. Haftalık Meta özeti)">
+          <select id="vVis"><option value="private">🔒 Özel</option><option value="public">🌐 Herkese açık</option></select>
+        </div>
+        <input type="text" id="vShare" placeholder="Paylaşılacak kişiler: e-posta adresleri, virgülle (özel raporlar için)">
+        <label class="chk"><input type="checkbox" id="vState" checked> Filtreleri, tarih aralığını, seviyeyi ve sekmeyi de kaydet <span class="muted">(bitiş günü dün ise "son N gün" olarak saklanır)</span></label>
+      </div>
+      <div class="row end vfoot">
+        <button id="vSave" class="primary">Kaydet</button>
+        <button id="vSaveAs" class="hidden">Yeni rapor olarak kaydet</button>
+        <button id="vLink">🔗 Link</button>
+        <button id="vDel">Sil</button>
+        <button id="vReset">Varsayılana dön</button>
+        <button id="vClose">Kapat</button>
+      </div>
+      <div class="msg" id="vMsg"></div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="kModal">
+    <div class="modal-card">
+      <h3>Kartlar <span class="muted small" id="kTab"></span></h3>
+      <p class="muted small">Tablonun üstündeki kartları seç ve sırala. Kart üzerindeki × ile de kaldırabilirsin. Görünümle birlikte kaydedilir.</p>
+      <div class="vlist" id="kList"></div>
+      <div class="vh">Yeni metrik oluştur</div>
+      <div id="kmList"></div>
+      <div class="row"><input type="text" id="kmName" placeholder="Ad (ör. Sepet başı maliyet)" style="flex:1"><select id="kmU"><option value="num">Sayı</option><option value="usd">Para</option><option value="pct">Yüzde</option><option value="x">Kat (x)</option></select></div>
+      <textarea id="kmF" rows="2" placeholder="Formül: metrik adlarına tıkla, + − × ÷ ve parantez kullan (ör. spend / purchases)" style="width:100%;box-sizing:border-box;margin-top:6px"></textarea>
+      <div class="cmchips" id="kmChips"></div>
+      <div class="row"><button id="kmAdd">Metriği oluştur ve kart olarak ekle</button></div>
+      <div class="msg" id="kmMsg"></div>
+      <div class="row end"><button id="kReset">Varsayılan kartlar</button><button id="kClose" class="primary">Tamam</button></div>
+    </div>
+  </div>
+
   <div id="busy" class="busy hidden"><div class="spin"></div><span id="busyTxt">Veriler yükleniyor…</span></div>
   <div id="toast" class="toast hidden"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <script>var BOOT = <?!= bootJson ?>; window.__GK = <?!= JSON.stringify(guestKey || '') ?>;</script>
+  <script>var BOOT = <?!= bootJson ?>; window.__GK = <?!= JSON.stringify(guestKey || '') ?>; window.__RID = <?!= JSON.stringify(reportId || '') ?>;</script>
   <?!= include('App'); ?>
 </body>
 </html>

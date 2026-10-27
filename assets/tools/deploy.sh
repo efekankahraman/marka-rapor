@@ -29,7 +29,10 @@ if [ "$1" = "--init" ]; then
   python3 - "$GUEST" <<'PY'
 import re,sys
 p='Brand.js'; s=open(p).read()
-s=re.sub(r"GUEST_DEPLOYMENT_ID:\s*'[^']*'", "GUEST_DEPLOYMENT_ID: '"+sys.argv[1]+"'", s); open(p,'w').write(s)
+s=re.sub(r"GUEST_DEPLOYMENT_ID:\s*'[^']*'", "GUEST_DEPLOYMENT_ID: '"+sys.argv[1]+"'", s)
+import secrets
+if re.search(r"BING_PUSH_KEY:\s*''", s): s=re.sub(r"BING_PUSH_KEY:\s*''", "BING_PUSH_KEY: '"+secrets.token_urlsafe(24)+"'", s)  # Microsoft Ads script'i → rapor anahtarı
+open(p,'w').write(s)
 PY
   echo "main=$MAIN"; echo "guest=$GUEST"
   echo "Brand.js güncellendi → şimdi: /bin/bash tools/deploy.sh v1"

@@ -4,7 +4,11 @@
   "exceptionLogging": "STACKDRIVER",
   "dependencies": {
     "enabledAdvancedServices": [
-      { "userSymbol": "AnalyticsData", "serviceId": "analyticsdata", "version": "v1beta" }
+      {
+        "userSymbol": "AnalyticsData",
+        "serviceId": "analyticsdata",
+        "version": "v1beta"
+      }
     ]
   },
   "webapp": {

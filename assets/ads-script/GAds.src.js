@@ -76,6 +76,20 @@ function main() {
       sh_log_(ss, 'gads', 'INFO', 'Backfill tamamlandı.');
     }
   }
+  // 3) Varlık (PMax görsel / video, Search görsel uzantıları, metinler) backfill — ay ay geriye
+  if (sh_getState_(ss, STATE_PREFIX + 'BACKFILL_DONE') === 'yes' && sh_getState_(ss, STATE_PREFIX + 'ASSET2_DONE') !== 'yes') {
+    var ac = sh_getState_(ss, STATE_PREFIX + 'ASSET2_CURSOR') || today.slice(0, 7);
+    while (ac >= start.slice(0, 7)) {
+      if (remaining_() < MIN_SECONDS_FOR_MONTH) break;
+      var aF = ac + '-01', aT = sh_monthEnd_(aF);
+      if (aT > today) aT = today;
+      if (aF < start) aF = start;
+      if (!processAssets_(ss, accessible, aF, aT)) break;
+      ac = sh_addDays_(ac + '-01', -1).slice(0, 7);
+      sh_setState_(ss, STATE_PREFIX + 'ASSET2_CURSOR', ac);
+    }
+    if (ac < start.slice(0, 7)) { sh_setState_(ss, STATE_PREFIX + 'ASSET2_DONE', 'yes'); sh_log_(ss, 'gads', 'INFO', 'Varlık backfill tamamlandı.'); }
+  }
 }
 
 function parseTs_(s) {
@@ -107,6 +121,7 @@ function processRange_(ss, accounts, from, to) {
   var rep = { accounts: done, from: from, to: to };
   st_upsert_(ss, 'gads_campaign' + DATASET_SUFFIX, GADS_CAMP_HEADER, camp, rep, GADS_TEXT);
   st_upsert_(ss, 'gads_ad' + DATASET_SUFFIX, GADS_AD_HEADER, ads, rep, GADS_TEXT);
+  if (!cut) processAssets_(ss, accounts, from, to);
   sh_updateAccounts_(ss, 'Google Ads', cur);
   sh_log_(ss, 'gads', 'INFO', from + '→' + to + ': ' + done.length + ' hesap, ' + camp.length + ' kampanya satırı, ' + ads.length + ' ad satırı');
   return !cut;
@@ -162,4 +177,89 @@ function queryAds_(id, from, to) {
     }
   } catch (e) { Logger.log('asset_group sorgusu atlandı: ' + e); }
   return out;
+}
+
+/* ---------------- Varlıklar: PMax asset group görsel / video / metin, reklam varlıkları, görsel uzantıları ---------------- */
+var GADS_ASSET_HEADER = ['date', 'account_id', 'account_name', 'currency', 'campaign_id', 'campaign_name', 'channel_type',
+  'container_id', 'container_name', 'level', 'asset_id', 'asset_type', 'field_type', 'asset_name', 'image_url', 'youtube_id', 'text',
+  'impressions', 'clicks', 'cost', 'conversions', 'conv_value', 'source'];
+var GADS_ASSET_TEXT = ['account_name', 'currency', 'campaign_id', 'campaign_name', 'channel_type', 'container_id', 'container_name', 'level',
+  'asset_id', 'asset_type', 'field_type', 'asset_name', 'image_url', 'youtube_id', 'text', 'source'];
+var ASSET_METRICS = 'metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value';
+function arow_(r, id, cont, level, fieldType) {
+  var a = r.asset || {}, m = r.metrics || {};
+  var img = a.imageAsset && a.imageAsset.fullSize ? a.imageAsset.fullSize.url || '' : '';
+  var yt = a.youtubeVideoAsset ? a.youtubeVideoAsset.youtubeVideoId || '' : '';
+  var nm = a.name || (a.youtubeVideoAsset && a.youtubeVideoAsset.youtubeVideoTitle) || '';
+  return [r.segments && r.segments.date ? r.segments.date : '', id, (r.customer && r.customer.descriptiveName) || '', (r.customer && r.customer.currencyCode) || '',
+    String(r.campaign.id), r.campaign.name || '', r.campaign.advertisingChannelType || '',
+    String(cont.id || ''), cont.name || '', level, String(a.id || ''), a.type || '', fieldType || '', String(nm).slice(0, 200), img, yt,
+    String(assetText_(a)).slice(0, 400),
+    n_(m.impressions), n_(m.clicks), n_(m.costMicros) / 1e6, n_(m.conversions), n_(m.conversionsValue),
+    (r.assetGroupAsset && r.assetGroupAsset.source) || a.source || ''];
+}
+/** Kullanıcının gördüğü metin: metin varlığı, sitelink, callout, snippet, promosyon. */
+function assetText_(a) {
+  if (a.textAsset && a.textAsset.text) return a.textAsset.text;
+  var s = a.sitelinkAsset;
+  if (s) return [s.linkText, [s.description1, s.description2].filter(Boolean).join(' / ')].filter(Boolean).join(' — ');
+  if (a.calloutAsset) return a.calloutAsset.calloutText || '';
+  var sn = a.structuredSnippetAsset;
+  if (sn) return (sn.header ? sn.header + ': ' : '') + (sn.values || []).join(', ');
+  var p = a.promotionAsset;
+  if (p) {
+    var off = p.percentOff ? '%' + (p.percentOff / 10000) + ' indirim' : p.moneyAmountOff && p.moneyAmountOff.amountMicros ? (p.moneyAmountOff.amountMicros / 1e6) + ' ' + (p.moneyAmountOff.currencyCode || '') + ' indirim' : '';
+    return [p.promotionTarget, off, p.occasion && p.occasion !== 'UNSPECIFIED' && p.occasion !== 'UNKNOWN' ? p.occasion : '', p.promotionCode ? 'Kod: ' + p.promotionCode : ''].filter(Boolean).join(' · ');
+  }
+  return '';
+}
+function queryAssets_(id, from, to) {
+  var out = [], agg = {}, W = ' WHERE segments.date BETWEEN "' + from + '" AND "' + to + '"';
+  var C = 'segments.date, customer.descriptive_name, customer.currency_code, campaign.id, campaign.name, campaign.advertising_channel_type, ';
+  var AF = 'asset.id, asset.name, asset.type, asset.image_asset.full_size.url, asset.youtube_video_asset.youtube_video_id, asset.youtube_video_asset.youtube_video_title, asset.text_asset.text, asset.source';
+  var AX = AF + ', asset.sitelink_asset.link_text, asset.sitelink_asset.description1, asset.sitelink_asset.description2, asset.callout_asset.callout_text, ' +
+    'asset.structured_snippet_asset.header, asset.structured_snippet_asset.values, asset.promotion_asset.promotion_target, asset.promotion_asset.percent_off, ' +
+    'asset.promotion_asset.money_amount_off.amount_micros, asset.promotion_asset.money_amount_off.currency_code, asset.promotion_asset.occasion, asset.promotion_asset.promotion_code';
+  function run(q, fn) { try { var it = AdsApp.search(q); while (it.hasNext()) fn(it.next()); return true; } catch (e) { Logger.log('Varlık sorgusu atlandı: ' + e); return false; } }
+  function addAgg(row) {
+    var k = [row[0], row[9], row[7], row[10], row[12]].join('|'), x = agg[k];
+    if (!x) agg[k] = row; else for (var j = 17; j < 22; j++) x[j] += row[j];
+  }
+  // 1) PMax asset group varlıkları (metrik desteklenmiyorsa sadece liste)
+  var ok = run('SELECT ' + C + 'asset_group.id, asset_group.name, asset_group_asset.field_type, asset_group_asset.source, ' + AF + ', ' + ASSET_METRICS + ' FROM asset_group_asset' + W,
+    function (r) { addAgg(arow_(r, id, r.assetGroup || {}, 'asset_group', r.assetGroupAsset && r.assetGroupAsset.fieldType)); });
+  if (!ok) run('SELECT customer.descriptive_name, customer.currency_code, campaign.id, campaign.name, campaign.advertising_channel_type, asset_group.id, asset_group.name, asset_group_asset.field_type, asset_group_asset.source, ' + AF +
+    ' FROM asset_group_asset WHERE asset_group_asset.status = "ENABLED" AND campaign.status = "ENABLED"',
+    function (r) { r.segments = { date: to }; addAgg(arow_(r, id, r.assetGroup || {}, 'asset_group', r.assetGroupAsset && r.assetGroupAsset.fieldType)); });
+  // 2) reklam varlıkları (RSA başlık / açıklama, RDA / Demand Gen görselleri, videolar) — ad group'ta toplanır
+  run('SELECT ' + C + 'ad_group.id, ad_group.name, ad_group_ad_asset_view.field_type, ad_group_ad_asset_view.pinned_field, ' + AF + ', ' + ASSET_METRICS + ' FROM ad_group_ad_asset_view' + W,
+    function (r) {
+      var v = r.adGroupAdAssetView || {}, pin = v.pinnedField && !/UNSPECIFIED|UNKNOWN/.test(v.pinnedField) ? ':' + v.pinnedField : '';
+      addAgg(arow_(r, id, r.adGroup || {}, 'ad_group', (v.fieldType || '') + pin));
+    });
+  // 3) Search'e eklenen görseller (ad group ve kampanya seviyesi görsel uzantıları)
+  run('SELECT ' + C + 'ad_group.id, ad_group.name, ad_group_asset.field_type, ' + AX + ', ' + ASSET_METRICS + ' FROM ad_group_asset' + W,
+    function (r) { addAgg(arow_(r, id, r.adGroup || {}, 'ad_group_ext', r.adGroupAsset && r.adGroupAsset.fieldType)); });
+  run('SELECT ' + C + 'campaign_asset.field_type, ' + AX + ', ' + ASSET_METRICS + ' FROM campaign_asset' + W,
+    function (r) { addAgg(arow_(r, id, { id: r.campaign.id, name: r.campaign.name }, 'campaign_ext', r.campaignAsset && r.campaignAsset.fieldType)); });
+  // hesap seviyesi uzantılar (kampanya kırılımıyla)
+  run('SELECT ' + C + 'customer_asset.field_type, ' + AX + ', ' + ASSET_METRICS + ' FROM customer_asset' + W,
+    function (r) { addAgg(arow_(r, id, { id: 'account', name: 'Hesap seviyesi' }, 'account_ext', r.customerAsset && r.customerAsset.fieldType)); });
+  for (var k in agg) out.push(agg[k]);
+  return out;
+}
+function processAssets_(ss, accounts, from, to) {
+  var rows = [], done = [], cut = false;
+  for (var i = 0; i < accounts.length; i++) {
+    if (remaining_() < MIN_SECONDS_PER_ACCOUNT) { cut = true; break; }
+    AdsManagerApp.select(accounts[i]);
+    var id = accounts[i].getCustomerId();
+    try { var x = queryAssets_(id, from, to); for (var j = 0; j < x.length; j++) rows.push(x[j]); done.push(id); }
+    catch (e) { sh_log_(ss, 'gads', 'WARN', 'Varlık ' + id + ' ' + from + '→' + to + ': ' + e); }
+  }
+  if (done.length) {
+    st_upsert_(ss, 'gads_asset' + DATASET_SUFFIX, GADS_ASSET_HEADER, rows, { accounts: done, from: from, to: to }, GADS_ASSET_TEXT);
+    sh_log_(ss, 'gads', 'INFO', 'Varlık ' + from + '→' + to + ': ' + rows.length + ' satır');
+  }
+  return !cut;
 }

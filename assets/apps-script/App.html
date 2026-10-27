@@ -8,12 +8,13 @@
   var NF2 = new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   var NFC = new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 });
   var CUR_SYM = { USD: '$', EUR: '€', TRY: '₺', GBP: '£' };
+  function SYM() { return (typeof BOOT !== 'undefined' && BOOT && BOOT.ok && BOOT.data && BOOT.data.curSym) || '$'; }
   function bad(v) { return v == null || v === '' || (typeof v === 'number' && !isFinite(v)); }
   function fmt(v, u) {
     if (bad(v)) return '–';
     if (typeof v !== 'number') return esc(v);
     switch (u) {
-      case 'usd': return '$' + NF2.format(v);
+      case 'usd': return SYM() + NF2.format(v);
       case 'money': return NF2.format(v);
       case 'int': return NF0.format(v);
       case 'num': return Math.abs(v) >= 100 ? NF0.format(v) : NF2.format(v);
@@ -31,14 +32,14 @@
     if (bad(v)) return '';
     if (u === 'pct') return NF2.format(v * 100) + '%';
     if (u === 'x') return NF2.format(v);
-    return (u === 'usd' ? '$' : '') + NFC.format(v);
+    return (u === 'usd' ? SYM() : '') + NFC.format(v);
   }
   /** Kart için kısa biçim: büyük tutarlarda ondalık atılır, milyonlar "Mn" ile gösterilir (tam değer ipucunda). */
   function kpiFmt(v, u) {
     if (bad(v) || typeof v !== 'number') return fmt(v, u);
     var a = Math.abs(v);
     if (u === 'usd' || u === 'money') {
-      var pre = u === 'usd' ? '$' : '';
+      var pre = u === 'usd' ? SYM() : '';
       if (a >= 1e6) return pre + NF2.format(v / 1e6) + ' Mn';
       if (a >= 1e4) return pre + NF0.format(v);
       return pre + NF2.format(v);
@@ -103,9 +104,17 @@
     trend: { grain: 'week', metrics: ['spend_usd'], brk: 'none', mode: 'multi', res: null }
   };
   var LEVEL_ORDER = ['total', 'country', 'platform', 'account', 'campaign', 'adgroup', 'ad'];
-  var LEVEL_LABELS = { total: 'Toplam', country: 'Ülke', platform: 'Platform', account: 'Hesap', campaign: 'Kampanya', adgroup: 'Ad group / Ad set', ad: 'Ad' };
+  var LEVEL_LABELS = { total: 'Toplam', country: 'Ülke', platform: 'Mecra', account: 'Hesap', campaign: 'Kampanya', adgroup: 'Ad group / Ad set', ad: 'Ad' };
   var GRAINS = [['none', 'Dönemsiz'], ['day', 'Günlük'], ['week', 'Haftalık'], ['month', 'Aylık']];
   var GROUPS = [['ga4', 'GA4 Web'], ['adj', 'Adjust']];
+  // Varsayılan kolon sırası (Görünüm ile kişi başına değiştirilebilir)
+  var DEFAULT_COLS = ['spend_usd', 'roas', 'margin', 'cohort_roas', 'cpi', 'cps', 'tot_purchases', 'tot_revenue_usd',
+    'coh_purchases', 'coh_revenue_usd', 'tot_installs', 'cpc', 'ctr', 'tot_sessions', 'clicks', 'impressions'];
+  var GROUP_COLS = { ga4: ['ga_sessions', 'ga_purchases', 'ga_revenue_usd'], adj: ['adj_sessions', 'adj_purchases', 'adj_revenue_usd', 'adj_installs', 'adj_c_purchases', 'adj_c_revenue_usd'] };
+  var TOT_SHORT = { tot_sessions: 'Sessions', tot_purchases: 'Purchase', tot_revenue_usd: 'Revenue', tot_installs: 'Installs' };
+  var DIM_ALL = [['platform', 'Mecra'], ['country', 'Ülke'], ['tip', 'Tip'], ['account_name', 'Hesap'], ['account_id', 'Hesap ID'], ['campaign_name', 'Kampanya'], ['campaign_id', 'Kampanya ID'],
+    ['adgroup_name', 'Ad group / Ad set'], ['adgroup_id', 'Ad group ID'], ['ad_name', 'Ad'], ['ad_id', 'Ad ID'], ['ad_type', 'Ad tipi']];
+  var VIEW = { cols: DEFAULT_COLS.slice(), dims: {}, custom: [], kpis: {}, charts: {}, kcustom: {} }, VIEWS = [], VIEW_NAME = '', VIEW_ITEM = null, VIEW_ID = '', REPORT_URL = '', REPORT_GUEST = '';
   var SERIES = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
   function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
@@ -113,6 +122,7 @@
   function sum(a, b) { return (a || 0) + (b || 0); }
   var DERIVED = {
     roas: function (m) { return div(sum(m.ga_revenue_usd, m.adj_revenue_usd), m.spend_usd); },
+    margin: function (m) { return div(m.spend_usd, sum(m.ga_revenue_usd, m.adj_revenue_usd)); },
     cohort_roas: function (m) { return div(sum(m.ga_revenue_usd, m.adj_c_revenue_usd), m.spend_usd); },
     coh_purchases: function (m) { return sum(m.ga_purchases, m.adj_c_purchases); },
     coh_revenue_usd: function (m) { return sum(m.ga_revenue_usd, m.adj_c_revenue_usd); },
@@ -128,6 +138,63 @@
   };
 
   /* ================= istemci önbelleği + arka planda ön yükleme ================= */
+  /* ================= dönem karşılaştırma ================= */
+  var CMP = { on: false, mode: 'prev', from: '', to: '' };
+  function cmpPrev() { var n = daysSel(), to = addDays(S.from, -1); return { from: addDays(to, -(n - 1)), to: to }; }
+  function cmpYago(d) { var y = (+d.slice(0, 4) - 1) + d.slice(4); return y.slice(5) === '02-29' ? y.slice(0, 5) + '02-28' : y; }
+  function cmpRange() {
+    if (!CMP.on || !S.from || !S.to) return null;
+    if (CMP.mode === 'yoy') return { from: cmpYago(S.from), to: cmpYago(S.to) };
+    if (CMP.mode === 'custom') return CMP.from && CMP.to && CMP.from <= CMP.to ? { from: CMP.from, to: CMP.to } : null;
+    return cmpPrev();
+  }
+  function cmpParam() { var r = cmpRange(); return r ? { from: r.from, to: r.to } : undefined; }
+  function cmpD(d) { return d.split('-').reverse().join('.'); }
+  function cmpLabel() { var r = cmpRange(); return r ? cmpD(r.from) + ' – ' + cmpD(r.to) : 'Önceki dönem'; }
+  function cmpInv(c) { return !!c.inv || /^(cpc|cpm|cpa|cpi|cps|cpv|cost_per|margin|uninstall|bounce)/i.test(c.k); }
+  function cmpNeu(c) { return !!c.neu || /^(spend|spend_usd|cost)$/.test(c.k); }
+  /** Satır → karşılaştırma anahtarı: kırılım kolonları; dönem kolonu varsa sıra numarasıyla eşlenir (1. hafta ↔ 1. hafta). */
+  function cmpKeyer(res) {
+    var tix = [], pix = -1, pord = {};
+    res.columns.forEach(function (c, i) { if (c.k === 'period') pix = i; else if (c.t === 'text') tix.push(i); });
+    if (pix >= 0) { var ps = {}; res.rows.forEach(function (r) { ps[r[pix]] = 1; }); Object.keys(ps).sort().forEach(function (p, i) { pord[p] = i; }); }
+    return function (r) { return (pix >= 0 ? pord[r[pix]] + '|' : '') + tix.map(function (i) { return r[i]; }).join('|'); };
+  }
+  function cmpMap(res) {
+    if (!CMP.on || !res || !res.cmp || !res.cmp.rows) return null;
+    if (res._cm) return res._cm;
+    var kc = cmpKeyer(res.cmp), m = {};
+    res.cmp.rows.forEach(function (r) { m[kc(r)] = r; });
+    return (res._cm = { m: m, k: cmpKeyer(res) });
+  }
+  function cmpCell(v, p, c) {
+    if (p == null || bad(v) || bad(p) || !p) return '';
+    var d = (v - p) / Math.abs(p), a = Math.abs(d) * 100, cls = '';
+    if (Math.abs(d) >= 0.005 && !cmpNeu(c)) cls = (d > 0) !== cmpInv(c) ? ' pos' : ' neg';
+    return '<div class="cd' + cls + '" title="' + esc(cmpLabel() + ': ' + fmt(p, c.t)) + '">' + (d >= 0 ? '▲ ' : '▼ ') + (a < 10 ? a.toFixed(1).replace('.', ',') : NF0.format(Math.round(a))) + '%</div>';
+  }
+  function cmpUi() {
+    var r = cmpRange();
+    $('cmpOn').checked = CMP.on; $('cmpMode').value = CMP.mode;
+    $('cmpMode').classList.toggle('hidden', !CMP.on);
+    $('cmpCustom').classList.toggle('hidden', !(CMP.on && CMP.mode === 'custom'));
+    $('cmpFrom').value = CMP.from || ''; $('cmpTo').value = CMP.to || '';
+    $('cmpLbl').textContent = CMP.on && r && CMP.mode !== 'custom' ? 'vs ' + cmpLabel() : '';
+    if (B && B.startDate && r && r.from < B.startDate) $('cmpLbl').textContent += ' (veri ' + cmpD(B.startDate) + '\'den itibaren)';
+  }
+  function initCmp() {
+    if (B.startDate) $('cmpFrom').min = $('cmpTo').min = B.startDate;
+    if (B.dataEnd) $('cmpFrom').max = $('cmpTo').max = B.dataEnd;
+    $('cmpOn').onchange = function () { CMP.on = this.checked; cmpUi(); applyFilters(); };
+    $('cmpMode').onchange = function () {
+      CMP.mode = this.value;
+      if (CMP.mode === 'custom' && !(CMP.from && CMP.to)) { var r = cmpPrev(); CMP.from = r.from; CMP.to = r.to; }
+      cmpUi(); applyFilters();
+    };
+    var cust = function () { CMP.from = $('cmpFrom').value; CMP.to = $('cmpTo').value; if (CMP.from && CMP.to && CMP.from > CMP.to) return toast('Karşılaştırma başlangıcı bitişten sonra olamaz'); cmpUi(); scheduleApply(300); };
+    $('cmpFrom').onchange = cust; $('cmpTo').onchange = cust;
+    cmpUi();
+  }
   var QC = {};            // params-json → sonuç
   var inflight = {};      // params-json → Promise
   function qkey(p) { return JSON.stringify(p); }
@@ -153,6 +220,10 @@
     var out = {}; for (var k in base) out[k] = base[k];
     out.rows = rows;
     out.totals = totalsFor(base, rows, true);
+    if (base.cmp && base.cmp.columns) {
+      var crows = base.cmp.rows.filter(function (r) { return preds.every(function (pr) { return String(r[idx[pr.col]]) === String(pr.v); }); });
+      out.cmp = { from: base.cmp.from, to: base.cmp.to, columns: base.cmp.columns, rows: crows, totals: totalsFor(base.cmp, crows, true) };
+    }
     out.unmatched = [];
     return out;
   }
@@ -179,9 +250,10 @@
   }
 
   function baseParams(level, grain) {
-    return { source: 'ads', from: S.from, to: S.to, level: level, grain: grain,
+    return { source: 'ads', from: S.from, to: S.to, level: level, grain: grain, cmp: cmpParam(),
       filters: { platforms: S.f.platforms.slice(), countries: S.f.countries.slice(), accounts: S.f.accounts.slice(), kinds: S.f.kinds.slice(), campInc: termsRegex(S.f.campInc, false), campExc: termsRegex(S.f.campExc, true), eq: {},
-        pick: S.ads.pick ? { fields: S.ads.pick.fields, keys: S.ads.pick.keys } : null } };
+        pick: S.ads.pick ? { fields: S.ads.pick.fields, keys: S.ads.pick.keys } : null },
+      dims: VIEW.dims[level] && VIEW.dims[level].length ? VIEW.dims[level].slice() : undefined };
   }
   function drillPreds() {
     var pr = [];
@@ -271,11 +343,11 @@
   /* ================= birleşik filtre çubuğu (Meta / Google Ads tarzı) ================= */
   var FDEFS = [
     { k: 'countries', l: 'Ülke', type: 'multi', search: true, items: function () { return B.countries.map(function (c) { return { k: c.code, l: c.name, s: c.code }; }); } },
-    { k: 'platforms', l: 'Platform', type: 'multi', items: function () { return [{ k: 'Google Ads', l: 'Google Ads' }, { k: 'Meta', l: 'Meta' }]; } },
+    { k: 'platforms', l: 'Mecra', type: 'multi', items: function () { return (B.platforms || ['Google Ads', 'Meta']).map(function (p) { return { k: p, l: p }; }); } },
     { k: 'accounts', l: 'Hesap', type: 'multi', search: true, items: function () {
       return B.accounts.filter(function (a) {
         return (!S.f.platforms.length || S.f.platforms.indexOf(a.platform) >= 0) && (!S.f.countries.length || S.f.countries.indexOf(a.code) >= 0);
-      }).map(function (a) { return { k: a.key, l: a.name, s: (a.platform === 'Meta' ? 'Meta' : 'GAds') + ' · ' + a.code }; });
+      }).map(function (a) { return { k: a.key, l: a.name, s: ({ 'Google Ads': 'GAds', 'Microsoft Ads': 'Bing', 'Yandex Direct': 'Yandex' }[a.platform] || a.platform) + ' · ' + a.code }; });
     } },
     { k: 'kinds', l: 'Kampanya grubu', type: 'multi', items: function () { var g = B.campaignGroup || {}; return [{ k: 'ecom', l: g.inLabel || 'Grup', s: 'adında "' + (g.keyword || '') + '" geçen' }, { k: 'kurumsal', l: g.outLabel || 'Diğer', s: 'adında "' + (g.keyword || '') + '" geçmeyen' }]; } },
     { k: 'campInc', l: 'Kampanya adı içerir', type: 'terms', ph: 'Kampanya adı ekle… (Enter)' },
@@ -346,7 +418,7 @@
   var MF_PARSE = /^(.+?)\s*(>=|<=|=>|=<|>|<|=|≥|≤)\s*(-?[\d.,]+)\s*%?$/;
   function fSuggest(q) {
     var out = [], ql = trLower(q).trim();
-    var mcols = mfCols(S.ads.res);
+    var mcols = mfCols(S.ads.view || S.ads.res);
     // 1) metrik ifadesi: "roas > 3", "spend >= 1000", "ctr < 2"
     var m = MF_PARSE.exec(q.trim());
     if (m) {
@@ -424,7 +496,7 @@
     pop.onclick = function (e) { e.stopPropagation(); };
     function close() { pop.remove(); }
     if (!key) {
-      var mcols = mfCols(S.ads.res);
+      var mcols = mfCols(S.ads.view || S.ads.res);
       pop.innerHTML = '<div class="fp-scroll"><div class="fp-h">Boyut</div>' + FDEFS.map(function (d) { return '<button class="fp-item" data-k="' + d.k + '">' + esc(d.l) + '</button>'; }).join('') +
         '<div class="fp-h">Metrik</div>' + mcols.map(function (c) { return '<button class="fp-item" data-m="' + c.k + '">' + esc(c.l) + (c.t === 'pct' ? ' (%)' : '') + '</button>'; }).join('') + '</div>';
       pop.querySelectorAll('[data-k]').forEach(function (b) { b.onclick = function () { fPopup(b.getAttribute('data-k')); }; });
@@ -433,7 +505,7 @@
     }
     if (key === 'mf') {
       var f = mfIdx != null ? S.ads.mf[mfIdx] : { k: arguments[2], op: 'gt', v: '', v2: '' };
-      var cols = mfCols(S.ads.res);
+      var cols = mfCols(S.ads.view || S.ads.res);
       pop.innerHTML = '<div class="fp-h">Metrik filtresi</div><div class="fp-row"><select id="mfK">' + cols.map(function (c) { return '<option value="' + c.k + '"' + (c.k === f.k ? ' selected' : '') + '>' + esc(c.l) + (c.t === 'pct' ? ' (%)' : '') + '</option>'; }).join('') + '</select>' +
         '<select id="mfOp">' + MF_OPS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === f.op ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
         '<div class="fp-row"><input type="number" id="mfV" step="any" placeholder="değer" value="' + (f.v === '' ? '' : f.v) + '"><input type="number" id="mfV2" step="any" placeholder="ve"' + (f.op === 'between' ? '' : ' class="hidden"') + ' value="' + (isFinite(f.v2) ? f.v2 : '') + '"></div>' +
@@ -509,7 +581,7 @@
     $('fFrom').value = S.from; $('fTo').value = S.to;
   }
   function filterMeta() {
-    return { 'Tarih': S.from + ' – ' + S.to, 'Ülke': S.f.countries.join(', ') || 'Tümü', 'Platform': S.f.platforms.join(', ') || 'Tümü',
+    return { 'Tarih': S.from + ' – ' + S.to, 'Ülke': S.f.countries.join(', ') || 'Tümü', 'Mecra': S.f.platforms.join(', ') || 'Tümü',
       'Hesap': S.f.accounts.length ? S.f.accounts.length + ' hesap' : 'Tümü', 'Kampanya grubu': S.f.kinds.length === 1 ? (S.f.kinds[0] === 'ecom' ? (B.campaignGroup || {}).inLabel : (B.campaignGroup || {}).outLabel) : 'Tümü',
       'Kampanya içerir': S.f.campInc.terms.join(S.f.campInc.mode === 'and' ? ' VE ' : ' YA DA ') || '-', 'Kampanya hariç': S.f.campExc.terms.join(S.f.campExc.mode === 'and' ? ' VE ' : ' YA DA ') || '-',
       'Seviye': LEVEL_LABELS[S.ads.level], 'Detay': S.ads.drill.map(function (d) { return d.label; }).join(' › ') || '-',
@@ -531,12 +603,64 @@
 
   /* ================= tablo ================= */
   function visibleCols(res, opt) {
-    return res.columns.map(function (c, i) { return { c: c, i: i }; }).filter(function (x) {
+    var list = res.columns.map(function (c, i) { return { c: c, i: i }; }).filter(function (x) {
       if (x.c.t === 'hidden') return false;
       if (opt.hideIds && /_id$/.test(x.c.k)) return false;
       if (opt.groups && (x.c.g === 'ga4' || x.c.g === 'adj') && !opt.groups[x.c.g]) return false;
       return true;
     });
+    if (!opt.order) return list;
+    var byK = {}; list.forEach(function (x) { byK[x.c.k] = x; });
+    return list.filter(function (x) { return x.c.t === 'text'; })
+      .concat(opt.order.map(function (k) { return byK[k]; }).filter(function (x) { return x && x.c.t !== 'text'; }));
+  }
+  /** Görünür metrik sırası: görünümün kolonları + açık olan GA4/Adjust grupları (CPC'den önce). */
+  function effCols() {
+    var c = VIEW.cols.slice();
+    ['ga4', 'adj'].forEach(function (g) {
+      if (!S.ads.groups[g]) return;
+      var at = c.indexOf('cpc'); if (at < 0) at = c.length;
+      GROUP_COLS[g].forEach(function (k) { if (c.indexOf(k) < 0) c.splice(at++, 0, k); });
+    });
+    return c;
+  }
+  /* ----- özel metrik: formül (metrik anahtarları + − × ÷ parantez) ----- */
+  function cmCompile(expr, known) {
+    var f = String(expr || '').trim();
+    if (!f) throw new Error('Formül boş');
+    if (f.replace(/[A-Za-z_][A-Za-z0-9_]*/g, '').replace(/[0-9.,\s+\-*\/()]/g, '') !== '') throw new Error('Formülde sadece metrik adları, sayılar ve + - * / ( ) kullanılabilir');
+    var bad = [];
+    var js = f.replace(/,/g, '.').replace(/[A-Za-z_][A-Za-z0-9_]*/g, function (id) { if (known && !known[id]) bad.push(id); return 'V(' + JSON.stringify(id) + ')'; });
+    if (bad.length) throw new Error('Bilinmeyen metrik: ' + bad.join(', '));
+    var fn = new Function('V', 'return (' + js + ');');
+    fn(function () { return 1; }); // sözdizimi kontrolü
+    return fn;
+  }
+  function cmEval(fn, get) { try { var v = fn(get); return typeof v === 'number' && isFinite(v) ? v : null; } catch (e) { return null; } }
+  /** Görünüm uygulanmış sonuç: kısa etiketler + özel metrik kolonları (sunucu sonucu değişmez). */
+  function viewRes(res) {
+    if (!res) return res;
+    var out = {}; for (var k in res) out[k] = res[k];
+    if (res.cmp && res.cmp.columns) out.cmp = viewRes(res.cmp);
+    var short = !(S.ads.groups.ga4 || S.ads.groups.adj);
+    out.columns = res.columns.map(function (c) { var c2 = {}; for (var q in c) c2[q] = c[q]; if (short && TOT_SHORT[c.k]) c2.l = TOT_SHORT[c.k]; return c2; });
+    var known = {}; res.columns.forEach(function (c) { if (c.t !== 'text' && c.t !== 'hidden') known[c.k] = 1; });
+    var cms = [];
+    (VIEW.custom || []).forEach(function (cm) { try { cms.push({ cm: cm, fn: cmCompile(cm.f, known) }); } catch (e) {} });
+    if (!cms.length) return out;
+    var idx = {}; res.columns.forEach(function (c, i) { idx[c.k] = i; });
+    cms.forEach(function (x) {
+      out.columns.push({ k: x.cm.k, l: x.cm.l, t: x.cm.u || 'num', g: 'custom', d: true });
+      DERIVED[x.cm.k] = function (m) { return cmEval(x.fn, function (id) { return m[id] != null ? m[id] : (DERIVED[id] ? DERIVED[id](m) || 0 : 0); }); };
+    });
+    out.rows = res.rows.map(function (r) {
+      return r.concat(cms.map(function (x) { return cmEval(x.fn, function (id) { var i = idx[id]; return i == null ? 0 : (+r[i] || 0); }); }));
+    });
+    if (res.totals) {
+      var off = res.columns.length - res.totals.length;
+      out.totals = res.totals.concat(cms.map(function (x) { return cmEval(x.fn, function (id) { var i = idx[id]; return i == null || i < off ? 0 : (+res.totals[i - off] || 0); }); }));
+    }
+    return out;
   }
   function renderTable(el, res, st, opt) {
     opt = opt || {};
@@ -544,6 +668,7 @@
     var curIdx = -1;
     res.columns.forEach(function (c, i) { if (c.k === '_cur') curIdx = i; });
     var cols = visibleCols(res, opt);
+    var cm = cmpMap(res);
     var rows = res.rows.map(function (r, i) { return { r: r, i: i }; });
     if (st.sort) {
       var si = st.sort.i, dir = st.sort.dir;
@@ -565,7 +690,7 @@
         return '<th data-i="' + x.i + '" class="' + (x.c.t === 'text' ? 't' : '') + (x.c.g === 'tot' ? ' g-tot' : '') + '">' + esc(x.c.l) + arrow + '</th>';
       }).join('') + '</tr></thead><tbody>';
     slice.forEach(function (x) {
-      var r = x.r;
+      var r = x.r; var cr = cm ? (cm.m[cm.k(r)] || []) : null;
       h += '<tr' + (sel[x.i] ? ' class="sel"' : '') + '>' + (opt.selectable ? '<td class="cb"><input type="checkbox" data-row="' + x.i + '"' + (sel[x.i] ? ' checked' : '') + '></td>' : '') +
         cols.map(function (cx) {
           var v = r[cx.i];
@@ -575,7 +700,7 @@
             return '<td class="t' + (/_id$/.test(cx.c.k) ? ' id' : '') + '">' + esc(txt) + '</td>';
           }
           if (cx.c.orig && curIdx >= 0) return '<td>' + fmtCur(v, r[curIdx]) + '</td>';
-          return '<td' + (cx.c.g === 'tot' ? ' class="g-tot"' : '') + '>' + fmt(v, cx.c.t) + '</td>';
+          return '<td' + (cx.c.g === 'tot' ? ' class="g-tot"' : '') + '>' + fmt(v, cx.c.t) + (cr ? cmpCell(v, cr[cx.i], cx.c) : '') + '</td>';
         }).join('') + '</tr>';
     });
     if (res.totals) {
@@ -583,7 +708,7 @@
       h += '<tr class="tot">' + (opt.selectable ? '<td class="cb"></td>' : '') + cols.map(function (cx) {
         if (cx.c.t === 'text') { var t = firstText ? 'Toplam (' + NF0.format(res.rows.length) + ' satır)' : ''; firstText = false; return '<td class="t">' + t + '</td>'; }
         if (cx.c.orig && curIdx >= 0) return '<td>' + fmtCur(res.totals[cx.i - off], res.totals[curIdx - off]) + '</td>';
-        return '<td>' + fmt(res.totals[cx.i - off], cx.c.t) + '</td>';
+        return '<td>' + fmt(res.totals[cx.i - off], cx.c.t) + (cm && res.cmp.totals ? cmpCell(res.totals[cx.i - off], res.cmp.totals[cx.i - off], cx.c) : '') + '</td>';
       }).join('') + '</tr>';
     }
     h += '</tbody></table>';
@@ -684,20 +809,135 @@
       .then(function (d) { toast('Hazır: <a href="' + d.url + '" target="_blank">Google Sheets\'te aç</a>', 15000); window.open(d.url, '_blank'); })
       .catch(fail);
   }
-  function kpis(el, res, keys) {
+  var KPI_DEF = { cpas: ['spend', 'purchase_value', 'roas', 'margin', 'purchases', 'cpa', 'aov', 'link_clicks', 'ctr', 'cpc', 'cvr', 'cart_to_purchase'], ads: ['spend_usd', 'roas', 'margin', 'cohort_roas', 'cpi', 'cps', 'tot_purchases', 'tot_revenue_usd', 'coh_purchases', 'coh_revenue_usd', 'tot_installs', 'tot_sessions', 'clicks', 'impressions'], app: ['installs', 'organic_share', 'purchases', 'revenue', 'rev_per_install', 'cvr', 'ret_d1', 'ret_d7', 'ret_d30', 'avg_dau', 'arpdau', 'uninstall_rate', 'cpi', 'roas', 'margin', 'sessions'], web: ['sessions', 'totalUsers', 'eng_rate', 'ecommercePurchases', 'purchaseRevenue', 'cvr', 'aov', 'rps', 'cart_to_purchase', 'spend', 'blended_roas', 'margin'] };
+  // e-ticaret uygulaması: önce gelir ve satış, sonra kullanım ve edinim
+  KPI_DEF.app = ['revenue', 'purchases', 'aov', 'cvr', 'cart_to_purchase', 'sessions', 'avg_dau', 'arpdau', 'installs', 'cost', 'cpi', 'roas', 'margin', 'rev_per_install', 'ret_d7', 'organic_share'];
+  var KTAB = 'ads';
+  var KPI_REDRAW = { ads: function () { drawAds(); }, app: function () { drawApp(); }, web: function () { drawWeb(); }, cpas: function () { drawCpas(); } };
+  function kpiKeys(tab) { var k = VIEW.kpis && VIEW.kpis[tab]; return k && k.length ? k : KPI_DEF[tab]; }
+  function kpis(el, res, keys, tab) {
     if (!res || !res.totals) { el.innerHTML = ''; return; }
     var off = res.columns.length - res.totals.length;
-    var byK = {}; res.columns.forEach(function (c, i) { byK[c.k] = { c: c, v: i >= off ? res.totals[i - off] : null }; });
+    var pt = CMP.on && res.cmp && res.cmp.totals ? res.cmp.totals : null;
+    var byK = {}; res.columns.forEach(function (c, i) { byK[c.k] = { c: c, v: i >= off ? res.totals[i - off] : null, p: pt && i >= off ? pt[i - off] : null }; });
+    if (tab && tab !== 'ads') ((VIEW.kcustom || {})[tab] || []).forEach(function (m) {
+      try {
+        var fn = cmCompile(m.f);
+        byK[m.k] = { c: { k: m.k, l: m.l, t: m.u }, v: cmEval(fn, function (id) { return byK[id] ? byK[id].v : null; }),
+          p: pt ? cmEval(fn, function (id) { return byK[id] ? byK[id].p : null; }) : null };
+      } catch (e) {}
+    });
     el.innerHTML = keys.filter(function (k) { return byK[k]; }).map(function (k) {
       var v = byK[k].v, t = byK[k].c.t;
-      return '<div class="kpi" title="' + esc(byK[k].c.l + ': ' + fmt(v, t)) + '"><div class="l">' + esc(byK[k].c.l) + '</div><div class="v">' + kpiFmt(v, t) + '</div></div>';
-    }).join('');
+      return '<div class="kpi" title="' + esc(byK[k].c.l + ': ' + fmt(v, t)) + '">' + (tab ? '<button class="kx" data-kx="' + esc(k) + '" title="Kartı kaldır">×</button>' : '') +
+        '<div class="l">' + esc(byK[k].c.l) + '</div><div class="v">' + kpiFmt(v, t) + '</div>' + kpiDelta(byK[k]) + '</div>';
+    }).join('') + (tab ? '<button class="kpi kpi-add" data-kadd="1" title="Kart ekle, çıkar, sırala">＋ Kart</button>' : '');
+    if (tab) el.onclick = function (e) {
+      var x = e.target.closest('[data-kx]'), a = e.target.closest('[data-kadd]');
+      if (x) { var list = kpiKeys(tab).slice(), at = list.indexOf(x.getAttribute('data-kx')); if (at >= 0) list.splice(at, 1); VIEW.kpis[tab] = list; KPI_REDRAW[tab](); }
+      else if (a) openKpiModal(tab);
+    };
     fitKpis(el);
+  }
+  /** Sürükle-bırak ile sıralama: satırlarda data-di (sıra) ve draggable olmalı; done(eskiSıra, yeniSıra). */
+  function dragSort(el, done) {
+    var from = null;
+    var clear = function () { el.querySelectorAll('.dragging,.dropb,.dropa').forEach(function (x) { x.classList.remove('dragging', 'dropb', 'dropa'); }); };
+    el.ondragstart = function (e) {
+      var r = e.target.closest && e.target.closest('[data-di]'); if (!r) return;
+      from = +r.getAttribute('data-di'); r.classList.add('dragging');
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(from)); } catch (x) {}
+    };
+    el.ondragover = function (e) {
+      if (from == null) return;
+      var r = e.target.closest && e.target.closest('[data-di]'); if (!r) return;
+      e.preventDefault();
+      el.querySelectorAll('.dropb,.dropa').forEach(function (x) { x.classList.remove('dropb', 'dropa'); });
+      var rc = r.getBoundingClientRect(); r.classList.add(e.clientY < rc.top + rc.height / 2 ? 'dropb' : 'dropa');
+    };
+    el.ondrop = function (e) {
+      if (from == null) return;
+      e.preventDefault();
+      var r = e.target.closest && e.target.closest('[data-di]'), f = from; from = null;
+      if (!r) { clear(); return; }
+      var to = +r.getAttribute('data-di'), rc = r.getBoundingClientRect();
+      if (e.clientY >= rc.top + rc.height / 2) to++;
+      if (to > f) to--;
+      clear();
+      if (to !== f) done(f, to);
+    };
+    el.ondragend = function () { from = null; clear(); };
+  }
+  function kpiCatalog(tab) {
+    var res = tab === 'ads' ? (S.ads.view || (S.ads.res && viewRes(S.ads.res))) : tab === 'app' ? APPS.res : tab === 'cpas' ? CPS.res : (WEBS.res && WEBS.res.kpi);
+    if (!res) return [];
+    var seen = {};
+    return res.columns.filter(function (c) { if (c.t === 'text' || c.t === 'hidden' || seen[c.k]) return false; seen[c.k] = 1; return true; })
+      .map(function (c) { return { k: c.k, l: c.l }; })
+      .concat(tab === 'ads' ? [] : ((VIEW.kcustom || {})[tab] || []).map(function (m) { return { k: m.k, l: m.l + ' · özel', custom: 1 }; }));
+  }
+  function openKpiModal(tab) {
+    KTAB = tab; $('kModal').classList.remove('hidden'); drawKpiModal();
+    $('kClose').onclick = function () { $('kModal').classList.add('hidden'); };
+    $('kModal').onclick = function (e) { if (e.target === $('kModal')) $('kModal').classList.add('hidden'); };
+    $('kReset').onclick = function () { delete VIEW.kpis[KTAB]; KPI_REDRAW[KTAB](); drawKpiModal(); };
+  }
+  function drawKpiModal() {
+    var tab = KTAB, cat = kpiCatalog(tab), byK = {}; cat.forEach(function (c) { byK[c.k] = c; });
+    var on = kpiKeys(tab).filter(function (k) { return byK[k]; }), off = cat.filter(function (c) { return on.indexOf(c.k) < 0; });
+    $('kTab').textContent = '(' + ({ ads: 'Rapor', app: 'App', web: 'Web', cpas: B.cpasLabel || 'CPAS' }[tab] || '') + ' sekmesi)';
+    $('kList').innerHTML = (on.map(function (k, i) {
+      return '<div class="vrow" draggable="true" data-di="' + i + '"><input type="checkbox" checked data-c="' + esc(k) + '"><span class="sp" data-c="' + esc(k) + '">' + esc(byK[k].l) + '</span>' +
+        '<span class="vgrip" title="Sürükleyerek sırala">⋮⋮</span></div>';
+    }).join('') + (off.length ? '<div class="vh muted small" style="margin:8px 6px 2px">Eklenebilir</div>' : '') + off.map(function (c) {
+      return '<div class="vrow off"><input type="checkbox" data-c="' + esc(c.k) + '"><span class="sp" data-c="' + esc(c.k) + '">' + esc(c.l) + '</span></div>';
+    }).join('')) || '<div class="muted small">Önce veri yüklenmeli.</div>';
+    dragSort($('kList'), function (a, b) {
+      var list = on.slice(), k = list.splice(a, 1)[0]; list.splice(b, 0, k);
+      VIEW.kpis[tab] = list; KPI_REDRAW[tab](); drawKpiModal();
+    });
+    // yeni metrik
+    var custom = tab === 'ads' ? (VIEW.custom || []) : ((VIEW.kcustom || {})[tab] || []);
+    $('kmList').innerHTML = custom.map(function (c, i) { return '<div class="vrow"><span class="sp">' + esc(c.l) + ' <code>= ' + esc(c.f) + '</code></span><button data-kmdel="' + i + '" title="Sil">×</button></div>'; }).join('');
+    $('kmList').onclick = function (e) {
+      var i = e.target.getAttribute('data-kmdel'); if (i == null) return;
+      var k = custom[+i].k; custom.splice(+i, 1);
+      if (tab === 'ads') { var at = VIEW.cols.indexOf(k); if (at >= 0) VIEW.cols.splice(at, 1); drawAds(); }
+      VIEW.kpis[tab] = kpiKeys(tab).filter(function (x) { return x !== k; }); KPI_REDRAW[tab](); drawKpiModal();
+    };
+    $('kmChips').innerHTML = cat.filter(function (c) { return !c.custom; }).map(function (c) { return '<button data-ins="' + esc(c.k) + '" title="' + esc(c.k) + '">' + esc(c.l) + '</button>'; }).join('') +
+      ['+', '-', '*', '/', '(', ')'].map(function (o) { return '<button data-ins="' + o + '">' + o + '</button>'; }).join('');
+    $('kmChips').onclick = function (e) {
+      var v = e.target.getAttribute('data-ins'); if (!v) return;
+      var ta = $('kmF'), s0 = ta.selectionStart || ta.value.length, ins = (/^[A-Za-z_]/.test(v) ? v : ' ' + v + ' ');
+      ta.value = ta.value.slice(0, s0) + ins + ta.value.slice(ta.selectionEnd || s0); ta.focus(); ta.selectionStart = ta.selectionEnd = s0 + ins.length;
+    };
+    $('kmAdd').onclick = function () {
+      var l = $('kmName').value.trim(), f = $('kmF').value.trim();
+      if (!l) { $('kmName').focus(); $('kmMsg').textContent = 'Metriğe bir ad ver.'; return; }
+      var known = {}; cat.forEach(function (c) { if (!c.custom) known[c.k] = 1; });
+      try { cmCompile(f, known); } catch (er) { $('kmMsg').textContent = '⚠ ' + er.message; return; }
+      var k = (tab === 'ads' ? 'cm_' : 'km_') + Date.now().toString(36), m = { k: k, l: l, f: f, u: $('kmU').value };
+      if (tab === 'ads') { VIEW.custom.push(m); drawAds(); }
+      else { VIEW.kcustom = VIEW.kcustom || {}; (VIEW.kcustom[tab] = VIEW.kcustom[tab] || []).push(m); }
+      var list = kpiKeys(tab).slice(); list.push(k); VIEW.kpis[tab] = list;
+      $('kmName').value = ''; $('kmF').value = ''; $('kmMsg').textContent = '✓ "' + l + '" kart olarak eklendi. Kalıcı olması için görünümü / raporu kaydet.';
+      KPI_REDRAW[tab](); drawKpiModal();
+    };
+    $('kList').onclick = function (e) {
+      var t = e.target, k = t.getAttribute('data-c'), list = on.slice();
+      if (t.hasAttribute('data-up') || t.hasAttribute('data-dn')) {
+        var i = +(t.getAttribute('data-up') || t.getAttribute('data-dn')), j = t.hasAttribute('data-up') ? i - 1 : i + 1;
+        var tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+      } else if (k) { var at = list.indexOf(k); if (at >= 0) list.splice(at, 1); else list.push(k); }
+      else return;
+      VIEW.kpis[tab] = list; KPI_REDRAW[tab](); drawKpiModal();
+    };
   }
 
   /* ================= RAPOR ================= */
   function adsOpt() {
-    return { hideIds: !S.ads.ids, groups: S.ads.groups, selectable: true, onSel: selInfo,
+    return { hideIds: !S.ads.ids, groups: S.ads.groups, order: effCols(), selectable: true, onSel: selInfo,
       drill: { country: 1, platform: 1, account_name: 1, campaign_name: 1, adgroup_name: 1 }, onDrill: drillAds };
   }
   function drawLevelSeg() {
@@ -707,9 +947,228 @@
     drawLevelSeg();
     seg($('adsGrain'), GRAINS, S.ads.grain, function (v) { S.ads.grain = v; loadAds(); });
     drawGroupChips();
+    initViews();
     $('adsIds').onchange = function () { S.ads.ids = this.checked; drawAds(); };
     $('adsCsv').onclick = function () { if (S.ads.view) downloadCsv(exportView(S.ads.view, S.ads, adsOpt()), 'rapor_' + S.ads.level); };
     $('adsExport').onclick = function () { if (S.ads.view) exportSheet(exportView(S.ads.view, S.ads, adsOpt()), 'Rapor · ' + LEVEL_LABELS[S.ads.level]); };
+  }
+  /* ================= GÖRÜNÜM (kolonlar, boyutlar, özel metrikler; kişi başına kaydedilir) ================= */
+  function viewClone(v) { return JSON.parse(JSON.stringify(v)); }
+  function viewSnapshot() { return { cols: VIEW.cols.slice(), dims: viewClone(VIEW.dims), custom: viewClone(VIEW.custom), kpis: viewClone(VIEW.kpis || {}), charts: viewClone(VIEW.charts || {}), kcustom: viewClone(VIEW.kcustom || {}), groups: { ga4: !!S.ads.groups.ga4, adj: !!S.ads.groups.adj } }; }
+  function viewApply(v, item, reload) {
+    var it = item && typeof item === 'object' ? item : null;
+    VIEW = { cols: (v && v.cols && v.cols.length ? v.cols : DEFAULT_COLS).slice(), dims: (v && v.dims) || {}, custom: (v && v.custom) || [], kpis: (v && v.kpis) || {}, charts: (v && v.charts) || {}, kcustom: (v && v.kcustom) || {} };
+    if (v && v.groups) { S.ads.groups.ga4 = !!v.groups.ga4; S.ads.groups.adj = !!v.groups.adj; drawGroupChips(); }
+    VIEW.cols = VIEW.cols.filter(function (k) { return k !== 'spend'; }); // tek para birimi: Spend (orig.) gereksiz
+    VIEW_ITEM = it; VIEW_ID = it ? it.id : ''; VIEW_NAME = it ? it.name : (typeof item === 'string' ? item : '');
+    lsSet('rpr_view', VIEW_ID);
+    drawViewSel();
+    if (v && v.state) stateApply(v.state);
+    if (APPS.res) drawApp();
+    if (WEBS.res) drawWeb();
+    if (reload) loadAds(); else drawAds();
+  }
+  /** Ekranın o anki durumu: filtreler, tarih (bitiş dün ise "son N gün"), seviye, dönem, sekme, App/Web kırılımları */
+  function stateSnapshot() {
+    var rel = S.to && S.to === B.dataEnd ? Math.round((Date.parse(S.to) - Date.parse(S.from)) / 864e5) + 1 : 0;
+    return { tab: S.tab === 'status' ? 'ads' : S.tab, from: S.from, to: S.to, rel: rel, f: viewClone(S.f), level: S.ads.level, grain: S.ads.grain, ids: !!S.ads.ids,
+      mf: viewClone(S.ads.mf || []), drill: viewClone(S.ads.drill || []), app: { dims: APPS.dims.slice(), grain: APPS.grain }, web: { dims: WEBS.dims.slice(), grain: WEBS.grain }, cmp: { on: CMP.on, mode: CMP.mode, from: CMP.from, to: CMP.to } };
+  }
+  function stateApply(st) {
+    if (st.f) Object.keys(st.f).forEach(function (k) { if (k in S.f) S.f[k] = viewClone(st.f[k]); });
+    if (st.rel) { S.to = B.dataEnd; S.from = addDays(S.to, -(st.rel - 1)); }
+    else if (st.from && st.to) { S.from = st.from; S.to = st.to; }
+    if (B.startDate && S.from < B.startDate) S.from = B.startDate;
+    if (B.dataEnd && S.to > B.dataEnd) S.to = B.dataEnd;
+    $('fFrom').value = S.from; $('fTo').value = S.to;
+    if (st.level && LEVEL_ORDER.indexOf(st.level) >= 0) S.ads.level = st.level;
+    if (st.grain) S.ads.grain = st.grain;
+    S.ads.ids = !!st.ids; if ($('adsIds')) $('adsIds').checked = S.ads.ids;
+    S.ads.mf = st.mf || []; S.ads.drill = st.drill || []; S.ads.pick = null; S.ads.sel = {}; S.ads.page = 0; S.ads.sort = null;
+    if (st.app) { if (st.app.dims) APPS.dims = st.app.dims; if (st.app.grain) APPS.grain = st.app.grain; }
+    if (st.web) { if (st.web.dims) WEBS.dims = st.web.dims; if (st.web.grain) WEBS.grain = st.web.grain; }
+    if (st.cmp) { CMP.on = !!st.cmp.on; CMP.mode = st.cmp.mode || 'prev'; CMP.from = st.cmp.from || ''; CMP.to = st.cmp.to || ''; }
+    if ($('cmpOn') && B) cmpUi();
+    APPS.stale = true; WEBS.stale = true; CRS.stale = true; CPS.stale = true; prefetchQ = [];
+    drawLevelSeg(); seg($('adsGrain'), GRAINS, S.ads.grain, function (v) { S.ads.grain = v; loadAds(); });
+    initApp(); initWeb(); drawFilterBar();
+    showTab(st.tab && $('p-' + st.tab) ? st.tab : 'ads');
+  }
+  function drawViewSel() {
+    var sel = $('viewSel'); if (!sel) return;
+    var g = { mine: [], shared: [], public: [] };
+    VIEWS.forEach(function (v) { (g[v.kind] || g.public).push(v); });
+    var opt = function (v) {
+      return '<option value="' + esc(v.id) + '"' + (v.id === VIEW_ID ? ' selected' : '') + '>' + esc(v.name) +
+        (v.kind === 'mine' ? (v.vis === 'public' ? ' 🌐' : (v.shared ? ' 👥' : '')) : ' · ' + esc(String(v.owner).split('@')[0])) + '</option>';
+    };
+    sel.innerHTML = '<option value="">Varsayılan görünüm</option>' + [['mine', 'Raporlarım'], ['shared', 'Benimle paylaşılan'], ['public', 'Herkese açık']]
+      .filter(function (x) { return g[x[0]].length; })
+      .map(function (x) { return '<optgroup label="' + x[1] + '">' + g[x[0]].map(opt).join('') + '</optgroup>'; }).join('');
+    sel.title = VIEW_ITEM ? (VIEW_ITEM.kind === 'mine' ? 'Senin raporun' : VIEW_ITEM.owner + ' kaydetti') + (VIEW_ITEM.updated ? ' · ' + String(VIEW_ITEM.updated).slice(0, 16) : '') : 'Kayıtlı raporlar';
+  }
+  function viewsSet(r) {
+    r = r || {};
+    VIEWS = r.items || (Array.isArray(r) ? r : []);
+    if (r.url) REPORT_URL = r.url;
+    if (r.guest !== undefined) REPORT_GUEST = r.guest || '';
+  }
+  function initViews() {
+    drawViewSel();
+    $('viewSel').onchange = function () {
+      var id = this.value, v = VIEWS.filter(function (x) { return x.id === id; })[0];
+      viewApply(v ? v.view : null, v || '', true);
+      if (v && v.kind !== 'mine') toast('"' + v.name + '" açıldı · ' + v.owner);
+    };
+    $('btnView').onclick = openViewModal;
+    call('apiViews', undefined, null, true).then(function (r) {
+      viewsSet(r);
+      var rid = window.__RID || '', want = rid || lsGet('rpr_view', '');
+      var v = VIEWS.filter(function (x) { return x.id === want || (!rid && x.kind === 'mine' && x.name === want); })[0];
+      if (v) { viewApply(v.view, v, true); if (rid) toast('"' + v.name + '" raporu açıldı'); }
+      else { drawViewSel(); if (rid) toast('Bu rapor bulunamadı ya da seninle paylaşılmamış.'); }
+    }).catch(function () {});
+  }
+  function viewFormFill() {
+    var it = VIEW_ITEM, mine = !it || it.kind === 'mine';
+    $('vName').value = it ? (mine ? it.name : it.name + ' (kopya)') : VIEW_NAME;
+    $('vVis').value = it && mine ? (it.vis || 'private') : 'private';
+    $('vShare').value = it && mine ? (it.shared || '') : '';
+    $('vShare').disabled = $('vVis').value === 'public';
+    $('vState').checked = !it || !!(it.view && it.view.state);
+    $('vSave').textContent = it && !mine ? 'Kopyasını kaydet' : (it ? 'Güncelle' : 'Kaydet');
+    $('vSaveAs').classList.toggle('hidden', !it || !mine);
+    $('vDel').disabled = !it || !mine;
+    $('vOwner').textContent = it ? (mine ? (it.vis === 'public' ? '· 🌐 herkese açık' : it.shared ? '· 👥 ' + it.shared : '· 🔒 özel') : '· ' + it.owner + ' kaydetti; değişikliklerin kendi kopyan olarak kaydedilir') : '';
+  }
+  function viewSave(asNew) {
+    var n = $('vName').value.trim();
+    if (!n) { $('vName').focus(); $('vMsg').textContent = 'Rapora bir ad ver.'; return; }
+    var view = viewSnapshot(); if ($('vState').checked) view.state = stateSnapshot();
+    var vis = $('vVis').value, upd = !asNew && VIEW_ITEM && VIEW_ITEM.kind === 'mine';
+    var body = { id: upd ? VIEW_ITEM.id : '', name: n, vis: vis, shared: vis === 'public' ? '' : $('vShare').value, view: view };
+    call('apiSaveView', JSON.stringify(body), 'Kaydediliyor…').then(function (r) {
+      viewsSet(r);
+      var it = VIEWS.filter(function (x) { return x.id === r.saved; })[0];
+      VIEW_ITEM = it || null; VIEW_ID = it ? it.id : ''; VIEW_NAME = n; lsSet('rpr_view', VIEW_ID); drawViewSel(); viewFormFill();
+      $('vMsg').innerHTML = '✓ "' + esc(n) + '" kaydedildi. ' + (vis === 'public' ? 'Rapora bakan herkes listede görür.' : (body.shared.trim() ? 'Paylaştığın kişiler kendi listelerinde "Benimle paylaşılan" altında görür.' : 'Sadece sen görürsün.')) + linkHtml();
+    }).catch(function (e) { $('vMsg').textContent = '⚠ ' + (e.message || e); });
+  }
+  function linkHtml() {
+    if (!VIEW_ID) return '';
+    var urls = [];
+    if (REPORT_URL) urls.push(['Ajans', REPORT_URL]);
+    if (REPORT_GUEST && REPORT_GUEST !== REPORT_URL) urls.push(['Marka ekibi', REPORT_GUEST]);
+    return urls.map(function (u) {
+      return '<div class="linkrow"><span class="muted small">' + u[0] + ' linki</span><input class="linkbox" readonly value="' + esc(u[1] + '?r=' + VIEW_ID) + '" onclick="this.select()"></div>';
+    }).join('');
+  }
+  function viewLink() {
+    if (!VIEW_ID) { $('vMsg').textContent = 'Link için önce raporu kaydet.'; return; }
+    $('vMsg').innerHTML = linkHtml();
+    var inp = $('vMsg').querySelector('input');
+    if (inp) { inp.select(); try { if (document.execCommand('copy')) toast('Link kopyalandı'); } catch (e) {} }
+  }
+  function viewCatalog() {
+    var res = S.ads.view || viewRes(S.ads.res), seen = {}, out = [];
+    var add = function (k, l, extra) { if (seen[k]) return; seen[k] = 1; out.push({ k: k, l: l, extra: extra || '' }); };
+    if (res) res.columns.forEach(function (c) { if (c.t !== 'text' && c.t !== 'hidden') add(c.k, c.l, c.g === 'custom' ? 'özel' : c.orig ? 'hesap seviyesi' : ''); });
+    B.ads.metrics.forEach(function (m) { add(m.k, (TOT_SHORT[m.k] && !(S.ads.groups.ga4 || S.ads.groups.adj)) ? TOT_SHORT[m.k] : m.l, m.orig ? 'hesap seviyesi' : ''); });
+    (VIEW.custom || []).forEach(function (c) { add(c.k, c.l, 'özel'); });
+    return out;
+  }
+  function openViewModal() {
+    $('vModal').classList.remove('hidden');
+    viewFormFill(); $('vMsg').textContent = ''; $('cmMsg').textContent = '';
+    drawViewModal();
+    $('vClose').onclick = function () { $('vModal').classList.add('hidden'); };
+    $('vModal').onclick = function (e) { if (e.target === $('vModal')) $('vModal').classList.add('hidden'); };
+    $('vReset').onclick = function () { viewApply(null, '', true); $('vName').value = ''; drawViewModal(); $('vMsg').textContent = 'Varsayılan görünüme dönüldü.'; };
+    $('vSave').onclick = function () { viewSave(false); };
+    $('vSaveAs').onclick = function () { viewSave(true); };
+    $('vLink').onclick = viewLink;
+    $('vVis').onchange = function () { $('vShare').disabled = this.value === 'public'; };
+    $('vDel').onclick = function () {
+      if (!VIEW_ITEM || VIEW_ITEM.kind !== 'mine') { $('vMsg').textContent = VIEW_ITEM ? 'Bu rapor ' + VIEW_ITEM.owner + ' tarafından kaydedildi; sadece sahibi silebilir.' : 'Silinecek kayıtlı rapor yok.'; return; }
+      var n = VIEW_ITEM.name;
+      call('apiSaveView', JSON.stringify({ id: VIEW_ITEM.id, del: true }), 'Siliniyor…').then(function (r) {
+        viewsSet(r); VIEW_ITEM = null; VIEW_ID = ''; VIEW_NAME = ''; lsSet('rpr_view', ''); drawViewSel(); viewFormFill(); $('vMsg').textContent = '"' + n + '" silindi.';
+      }).catch(function (e) { $('vMsg').textContent = '⚠ ' + (e.message || e); });
+    };
+    $('cmAdd').onclick = function () {
+      var l = $('cmName').value.trim(), f = $('cmF').value.trim();
+      if (!l) { $('cmName').focus(); return; }
+      var known = {}; viewCatalog().forEach(function (c) { known[c.k] = 1; });
+      try { cmCompile(f, known); } catch (e) { $('cmMsg').textContent = '⚠ ' + e.message; return; }
+      var k = 'cm_' + Date.now().toString(36);
+      VIEW.custom.push({ k: k, l: l, f: f, u: $('cmU').value });
+      VIEW.cols.push(k);
+      $('cmName').value = ''; $('cmF').value = ''; $('cmMsg').textContent = '✓ "' + l + '" eklendi (kolonların sonunda).';
+      drawAds(); drawViewModal();
+    };
+  }
+  function drawViewModal() {
+    var cat = viewCatalog(), byK = {}; cat.forEach(function (c) { byK[c.k] = c; });
+    var on = VIEW.cols.filter(function (k) { return byK[k]; });
+    var off = cat.filter(function (c) { return on.indexOf(c.k) < 0 && GROUP_COLS.ga4.indexOf(c.k) < 0 && GROUP_COLS.adj.indexOf(c.k) < 0; });
+    $('vCols').innerHTML = on.map(function (k, i) {
+      return '<div class="vrow" draggable="true" data-di="' + i + '"><input type="checkbox" checked data-c="' + k + '"><span class="sp" data-c="' + k + '">' + esc(byK[k].l) + (byK[k].extra ? ' <span class="muted small">' + byK[k].extra + '</span>' : '') + '</span>' +
+        '<span class="vgrip" title="Sürükleyerek sırala">⋮⋮</span></div>';
+    }).join('') + (off.length ? '<div class="vh muted small" style="margin:8px 6px 2px">Gizli</div>' : '') + off.map(function (c) {
+      return '<div class="vrow off"><input type="checkbox" data-c="' + c.k + '"><span class="sp" data-c="' + c.k + '">' + esc(c.l) + (c.extra ? ' <span class="muted small">' + c.extra + '</span>' : '') + '</span></div>';
+    }).join('') + '<div class="muted small" style="padding:6px">GA4 Web / Adjust kırılımları tablonun üstündeki "Ekle" düğmeleriyle açılır.</div>';
+    dragSort($('vCols'), function (a, b) {
+      var list = on.slice(), k = list.splice(a, 1)[0]; list.splice(b, 0, k);
+      VIEW.cols = list.concat(VIEW.cols.filter(function (x) { return on.indexOf(x) < 0; }));
+      drawAds(); drawViewModal();
+    });
+    $('vCols').onclick = function (e) {
+      var t = e.target, k = t.getAttribute('data-c');
+      if (t.hasAttribute('data-up') || t.hasAttribute('data-dn')) {
+        var i = +(t.getAttribute('data-up') || t.getAttribute('data-dn')), j = t.hasAttribute('data-up') ? i - 1 : i + 1;
+        var a = VIEW.cols.indexOf(on[i]), b = VIEW.cols.indexOf(on[j]);
+        var tmp = VIEW.cols[a]; VIEW.cols[a] = VIEW.cols[b]; VIEW.cols[b] = tmp;
+      } else if (k) {
+        var at = VIEW.cols.indexOf(k);
+        if (at >= 0) VIEW.cols.splice(at, 1); else VIEW.cols.push(k);
+      } else return;
+      drawAds(); drawViewModal();
+    };
+    // boyutlar (bu seviye)
+    var lvl = S.ads.level, max = lvl === 'ad' ? 12 : lvl === 'adgroup' ? 9 : 7;
+    var allowed = DIM_ALL.slice(0, max).filter(function (d) { return B.showCountry || d[0] !== 'country'; });
+    var cur = VIEW.dims[lvl] && VIEW.dims[lvl].length ? VIEW.dims[lvl] : ((S.ads.res && S.ads.res.columns.filter(function (c) { return c.t === 'text' && c.k !== 'period'; }).map(function (c) { return c.k; })) || []);
+    $('vLvl').textContent = '(' + LEVEL_LABELS[lvl] + ' seviyesi' + (VIEW.dims[lvl] && VIEW.dims[lvl].length ? ', özelleştirildi' : '') + ')';
+    $('vDims').innerHTML = allowed.map(function (d) {
+      return '<div class="vrow' + (cur.indexOf(d[0]) >= 0 ? '' : ' off') + '"><input type="checkbox" data-d="' + d[0] + '"' + (cur.indexOf(d[0]) >= 0 ? ' checked' : '') + '><span class="sp" data-d="' + d[0] + '">' + d[1] + '</span></div>';
+    }).join('') + (VIEW.dims[lvl] && VIEW.dims[lvl].length ? '<div class="vrow"><a href="#" id="vDimReset">bu seviyenin varsayılan boyutları</a></div>' : '');
+    $('vDims').onclick = function (e) {
+      if (e.target.id === 'vDimReset') { e.preventDefault(); delete VIEW.dims[lvl]; loadAds(); drawViewModal(); return; }
+      var k = e.target.getAttribute('data-d'); if (!k) return;
+      var list = cur.slice(), at = list.indexOf(k);
+      if (at >= 0) list.splice(at, 1); else list = allowed.map(function (d) { return d[0]; }).filter(function (x) { return x === k || list.indexOf(x) >= 0; });
+      if (!list.length) return;
+      VIEW.dims[lvl] = list; loadAds(); drawViewModal();
+    };
+    // özel metrikler
+    $('vCustom').innerHTML = (VIEW.custom || []).map(function (c, i) {
+      return '<div class="vrow"><span class="sp">' + esc(c.l) + ' <code>= ' + esc(c.f) + '</code></span><button data-cmdel="' + i + '" title="Sil">×</button></div>';
+    }).join('') || '<div class="muted small">Henüz özel metrik yok. Aşağıdan ekleyebilirsin; formüle metrik eklemek için adına tıkla.</div>';
+    $('vCustom').onclick = function (e) {
+      var i = e.target.getAttribute('data-cmdel'); if (i == null) return;
+      var k = VIEW.custom[+i].k; VIEW.custom.splice(+i, 1);
+      var at = VIEW.cols.indexOf(k); if (at >= 0) VIEW.cols.splice(at, 1);
+      drawAds(); drawViewModal();
+    };
+    $('cmChips').innerHTML = cat.filter(function (c) { return c.extra !== 'özel'; }).map(function (c) { return '<button data-ins="' + c.k + '" title="' + c.k + '">' + esc(c.l) + '</button>'; }).join('') +
+      ['+', '-', '*', '/', '(', ')'].map(function (o) { return '<button data-ins="' + o + '">' + o + '</button>'; }).join('');
+    $('cmChips').onclick = function (e) {
+      var v = e.target.getAttribute('data-ins'); if (!v) return;
+      var ta = $('cmF'), s0 = ta.selectionStart || ta.value.length;
+      var ins = (/^[A-Za-z_]/.test(v) ? v : ' ' + v + ' ');
+      ta.value = ta.value.slice(0, s0) + ins + ta.value.slice(ta.selectionEnd || s0);
+      ta.focus(); ta.selectionStart = ta.selectionEnd = s0 + ins.length;
+    };
   }
   function drawGroupChips() {
     $('adsGroups').innerHTML = '<span class="muted small">Ekle:</span>' + GROUPS.map(function (g) {
@@ -759,7 +1218,7 @@
   function loadAds() {
     var my = ++loadSeq;
     var p = drillParams(S.ads.level, S.ads.grain);
-    loadTrend(); // trend aynı filtre + detay + seçili satır filtresini kullanır
+    loadTrend(); loadGoals(); // trend aynı filtre + detay + seçili satır filtresini kullanır
     function show(res) {
       if (my !== loadSeq) return;
       S.ads.res = res; S.ads.sort = null; S.ads.page = 0; S.ads.sel = {}; S.ads.lastSel = null; drawAds();
@@ -772,10 +1231,11 @@
       .catch(function (e) { if (my === loadSeq) { $('adsWarn').textContent = e.message || e; $('adsTable').innerHTML = ''; $('adsKpis').innerHTML = ''; } });
   }
   function drawAds() {
-    var res = S.ads.view = mfApply(S.ads.res);
+    var res = S.ads.view = mfApply(viewRes(S.ads.res));
     drawFilterBar();
     $('adsWarn').textContent = res && res.warnings ? res.warnings.join(' · ') : '';
-    kpis($('adsKpis'), res, ['spend_usd', 'roas', 'cohort_roas', 'cpi', 'cps', 'impressions', 'clicks', 'tot_sessions', 'tot_purchases', 'tot_revenue_usd', 'coh_purchases', 'coh_revenue_usd', 'tot_installs']);
+    kpis($('adsKpis'), res, kpiKeys('ads'), 'ads');
+    drawGoals();
     renderTable($('adsTable'), res, S.ads, adsOpt());
     selInfo();
     // eşleşme özeti
@@ -818,10 +1278,15 @@
     var out = {}; for (var k in res) out[k] = res[k];
     out.rows = rows;
     out.totals = totalsFor(res, rows, true);
+    if (res.cmp && res.cmp.columns) {
+      var kc = cmpKeyer(res), keep = {}; rows.forEach(function (r) { keep[kc(r)] = 1; });
+      var kc2 = cmpKeyer(res.cmp), crows = res.cmp.rows.filter(function (r) { return keep[kc2(r)]; });
+      out.cmp = { from: res.cmp.from, to: res.cmp.to, columns: res.cmp.columns, rows: crows, totals: totalsFor(res.cmp, crows, true) };
+    }
     return out;
   }
   function mfLabel(f) {
-    var c = mfCols(S.ads.res).filter(function (x) { return x.k === f.k; })[0] || { l: f.k, t: '' };
+    var c = mfCols(S.ads.view || S.ads.res).filter(function (x) { return x.k === f.k; })[0] || { l: f.k, t: '' };
     var u = c.t === 'pct' ? '%' : '';
     var op = MF_OPS.filter(function (o) { return o[0] === f.op; })[0][1];
     return c.l + ' ' + (f.op === 'between' ? NF2.format(f.v) + u + ' – ' + NF2.format(f.v2) + u : op + ' ' + NF2.format(f.v) + u);
@@ -855,7 +1320,7 @@
     box.addEventListener('toggle', function () { lsSet('rpr_trend_open', box.open ? '1' : '0'); if (box.open) loadTrend(); });
     seg($('trGrain'), GRAINS.slice(1), S.trend.grain, function (v) { S.trend.grain = v; loadTrend(); });
     seg($('trMode'), [['multi', 'Metrik başına grafik'], ['index', 'Tek grafik (endeks)']], S.trend.mode, function (v) { S.trend.mode = v; drawTrend(); });
-    $('trBreak').innerHTML = [['none', 'Yok (toplam)'], ['country', 'Ülke'], ['platform', 'Platform'], ['account', 'Hesap'], ['campaign', 'Kampanya']].filter(function (o) { return B.showCountry || o[0] !== 'country'; })
+    $('trBreak').innerHTML = [['none', 'Yok (toplam)'], ['country', 'Ülke'], ['platform', 'Mecra'], ['account', 'Hesap'], ['campaign', 'Kampanya']].filter(function (o) { return B.showCountry || o[0] !== 'country'; })
       .map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('');
     $('trBreak').onchange = function () { S.trend.brk = this.value; loadTrend(); };
     $('trExport').onclick = function () { exportSheet(trendPivot(), 'Trend'); };
@@ -882,7 +1347,7 @@
   function loadTrend() {
     setTrendSum();
     if (!$('trendBox').open) return;
-    var p = drillParams(S.trend.brk === 'none' ? 'total' : S.trend.brk, S.trend.grain);
+    var p = drillParams(S.trend.brk === 'none' ? 'total' : S.trend.brk, S.trend.grain); delete p.cmp;
     // metrik filtresi aktifse trend sadece filtreye uyan satırları (ülke/hesap/kampanya…) kapsar
     var mfv = S.ads.mf.length && S.ads.view && PICK_FIELDS[S.ads.level];
     if (mfv) {
@@ -996,6 +1461,7 @@
 
   /* ================= DURUM (sadece admin) ================= */
   function initStatus() {
+    $('tabs').classList.remove('hidden'); // herkes (ajans + marka misafirleri): Durum hariç tüm sekmeler
     if (!B.isAdmin) return;
     $('tabStatus').classList.remove('hidden');
     $('tabs').classList.remove('hidden');
@@ -1007,10 +1473,21 @@
     $('inAdjApps').value = B.adjustApps || '';
     $('inAdjAcc').value = B.adjustAccount || '';
     $('btnSecrets').onclick = function () {
-      var o = { meta: $('inMeta').value, adjust: $('inAdj').value, adjustApps: $('inAdjApps').value, adjustAccount: $('inAdjAcc').value };
-      call('apiSaveSecrets', JSON.stringify(o), 'Kaydediliyor…').then(function (m) {
-        $('secMsg').textContent = m; $('inMeta').value = ''; $('inAdj').value = '';
-        if (o.meta) B.secrets.meta = true; if (o.adjust) B.secrets.adjust = true; pills(); loadStatus();
+      var o = { meta: $('inMeta').value, adjust: $('inAdj').value, adjustApps: $('inAdjApps').value, adjustAccount: $('inAdjAcc').value,
+        tiktok: $('inTiktok').value, yandex: $('inYandex').value, rtbhouse: $('inRtbhouse').value, criteo: $('inCriteo').value, yango: $('inYango').value };
+      call('apiSaveSecrets', JSON.stringify(o), 'Kaydediliyor…').then(function (r) {
+        var sv = (r && r.saved) || {}, PROP = { tiktok: 'TIKTOK_TOKEN', yandex: 'YANDEX_TOKEN', rtbhouse: 'RTBHOUSE_TOKEN', criteo: 'CRITEO_CREDENTIALS', yango: 'YANGO_TOKEN' };
+        $('secMsg').style.whiteSpace = 'pre-wrap'; $('secMsg').textContent = (r && r.message) || r;
+        // sadece kaydedilen alanlar temizlenir; hatalı olan kutuda kalır, düzeltip tekrar Kaydet'e basılabilir
+        B.secrets.meta = !!sv.META_TOKEN; B.secrets.adjust = !!sv.ADJUST_TOKEN;
+        if (o.meta && sv.META_TOKEN && !/⚠ Meta/.test(r.message)) $('inMeta').value = '';
+        if (o.adjust && sv.ADJUST_TOKEN && !/⚠ Adjust:/.test(r.message)) $('inAdj').value = '';
+        EXT_KEYS.forEach(function (k) {
+          var el = $('in' + k.charAt(0).toUpperCase() + k.slice(1));
+          B.secrets[k] = !!sv[PROP[k]];
+          if (o[k] && B.secrets[k] && r.message.indexOf('⚠ ' + ({ tiktok: 'TikTok', yandex: 'Yandex Direct', rtbhouse: 'RTB House', criteo: 'Criteo', yango: 'Yango Ads' })[k] + ':') < 0) el.value = '';
+        });
+        pills(); loadStatus();
       }).catch(function (e) { $('secMsg').textContent = '⚠ ' + (e.message || e); });
     };
     $('btnSync').onclick = function () { call('apiSyncNow', undefined, 'Senkron çalışıyor (maks. ~5 dk)…').then(function (r) { $('syncMsg').textContent = typeof r === 'string' ? r : ('Tamamlanan: ' + r.done + ', hata: ' + r.failed + ', bekleyen: ' + r.pending); loadStatus(); }).catch(fail); };
@@ -1029,13 +1506,19 @@
   function pills() {
     $('stMeta').className = 'pill ' + (B.secrets.meta ? 'ok' : 'no'); $('stMeta').textContent = B.secrets.meta ? '✓ tanımlı' : '✗ yok';
     $('stAdj').className = 'pill ' + (B.secrets.adjust ? 'ok' : 'no'); $('stAdj').textContent = B.secrets.adjust ? '✓ tanımlı ' + (B.secrets.adjustHint || '') : '✗ yok';
+    EXT_KEYS.forEach(function (k) {
+      var el = $('st' + k.charAt(0).toUpperCase() + k.slice(1));
+      el.className = 'pill ' + (B.secrets[k] ? 'ok' : 'no'); el.textContent = B.secrets[k] ? '✓ tanımlı' : '✗ yok';
+    });
   }
+  var EXT_KEYS = ['tiktok', 'yandex', 'rtbhouse', 'criteo', 'yango'];
   function loadStatus() {
     call('apiStatus', undefined, 'Durum okunuyor…').then(function (st) {
-      var names = { meta: 'Meta', adjust: 'Adjust' };
+      var names = { meta: 'Meta', adjust: 'Adjust', tiktok: 'TikTok', yandex: 'Yandex Direct', rtbhouse: 'RTB House', criteo: 'Criteo', yango: 'Yango Ads' };
       var h = '<table class="stat"><thead><tr><th class="t">Kaynak</th><th class="t">Bekleyen</th><th class="t">Tamamlanan</th><th class="t">Hata</th><th class="t">Son sorun</th></tr></thead><tbody>';
-      ['meta', 'adjust'].forEach(function (k) {
+      ['meta', 'adjust'].concat(EXT_KEYS).forEach(function (k) {
         var q = st.queue[k] || {};
+        if (EXT_KEYS.indexOf(k) >= 0 && !B.secrets[k]) q = { pending: q.pending || 0, done: q.done || 0, error: q.error || 0, lastError: '⚠ Token girilmemiş.' };
         if (k === 'adjust' && !B.adjustApps) q = { pending: 0, done: 0, error: 0, lastError: '⚠ Adjust app token girilmemiş — Adjust verisi çekilemiyor. Yukarıdaki "Adjust app token(lar)" alanını doldurup Kaydet\'e basın.' };
         if (k === 'adjust' && !B.secrets.adjust) q.lastError = '⚠ Adjust API token girilmemiş.';
         h += '<tr><td class="t">' + names[k] + '</td><td class="t">' + (q.pending || 0) + '</td><td class="t">' + (q.done || 0) + '</td><td class="t">' + (q.error || 0) + '</td><td class="t wrap">' + esc(q.lastError || '') + '</td></tr>';
@@ -1046,6 +1529,7 @@
           (g.GADS_LAST_RUN ? 'Son çalışma: ' + esc(g.GADS_LAST_RUN) + ' · Hesap erişimi: ' + esc(g.GADS_ACCESSIBLE) + ' · Backfill: ' + (g.GADS_BACKFILL_DONE === 'yes' ? 'tamam' : 'devam ediyor (sıradaki ay ' + esc(g.GADS_BACKFILL_CURSOR || '-') + ')') + ' · Son yenileme: ' + esc(g.GADS_LAST_REFRESH || '-')
             : 'Script henüz çalışmadı.') + '</td></tr>';
       });
+      h += '<tr><td class="t">Microsoft Ads (script)</td><td class="t wrap" colspan="4">' + (st.bing ? 'Son gönderim: ' + esc(st.bing) : 'Script henüz veri göndermedi.') + '</td></tr>';
       var gx = st.ga4x || {};
       h += '<tr><td class="t">GA4 (köprü)</td><td class="t wrap" colspan="4">' + (gx.GA4X_LAST_RUN ? 'Son çalışma: ' + esc(gx.GA4X_LAST_RUN) + ' · ' + esc(gx.GA4X_STATUS || '') + ' · Son yenileme: ' + esc(gx.GA4X_LAST_REFRESH || '-') : 'Köprü script\'i henüz çalışmadı') + '</td></tr>';
       h += '<tr><td class="t">Rapor önbelleği</td><td class="t" colspan="4">Son kurulum: ' + esc(st.cubeAt || '— (henüz kurulmadı)') + '</td></tr>';
@@ -1086,10 +1570,645 @@
 
   /* ================= sekmeler / başlangıç ================= */
   var statusLoaded = false;
+  /* ================= ZAMAN SERİSİ (metrik seçilebilir, Adjust raporlaması gibi) ================= */
+  var TS = {
+    app: { api: 'apiApp', grain: 'day', res: null, seq: 0, chart: null, def: ['revenue', 'purchases', 'sessions'] },
+    web: { api: 'apiWeb', grain: 'day', res: null, seq: 0, chart: null, def: ['sessions', 'ecommercePurchases', 'purchaseRevenue'] },
+    cpas: { grain: 'day', res: null, chart: null, def: ['spend', 'purchase_value', 'roas'] }
+  };
+  var TS_AX = { int: 'yc', num: 'yc', usd: 'ym', money: 'ym', pct: 'yp', x: 'yx' };
+  var TS_AXL = { yc: 'Adet', ym: 'Tutar', yp: '%', yx: 'Kat (x)' };
+  function tsLoad(key) {
+    var t = TS[key]; if (!t.api) return;
+    var my = ++t.seq;
+    call(t.api, JSON.stringify({ from: S.from, to: S.to, grain: t.grain, dims: [], f: key === 'app' ? appFilt() : undefined }), null, true).then(function (res) {
+      if (my !== t.seq) return;
+      t.res = res; tsDraw(key);
+    }).catch(function () {});
+  }
+  function tsCols(res) { return res ? res.columns.filter(function (c) { return c.t !== 'text' && c.t !== 'hidden'; }) : []; }
+  function tsSel(key) {
+    var t = TS[key], cols = tsCols(t.res), ok = {}; cols.forEach(function (c) { ok[c.k] = 1; });
+    var m = ((VIEW.charts && VIEW.charts[key]) || t.def).filter(function (k) { return ok[k]; });
+    return m.length ? m : cols.slice(0, 1).map(function (c) { return c.k; });
+  }
+  function tsColor(i) { return cssVar(SERIES[i % SERIES.length]) || '#06AEEF'; }
+  function tsDraw(key) {
+    var t = TS[key], res = t.res, chipsEl = $(key + 'TsChips'), cv = $(key + 'Ts');
+    if (!chipsEl || !cv) return;
+    var cols = tsCols(res), byK = {}; cols.forEach(function (c) { byK[c.k] = c; });
+    var sel = tsSel(key);
+    chipsEl.innerHTML = sel.map(function (k, i) {
+      return '<button class="on" data-tsx="' + esc(k) + '" title="Grafikten çıkar"><span class="dot" style="background:' + tsColor(i) + '"></span>' + esc(byK[k] ? byK[k].l : k) + ' ×</button>';
+    }).join('') + '<button class="tsadd" data-tsadd="1">＋ Metrik</button>' +
+      (t.api ? '<span class="tsg">' + [['day', 'Gün'], ['week', 'Hafta'], ['month', 'Ay']].map(function (g) { return '<button class="' + (t.grain === g[0] ? 'on' : '') + '" data-tsg="' + g[0] + '">' + g[1] + '</button>'; }).join('') + '</span>' : '');
+    chipsEl.onclick = function (e) {
+      var x = e.target.closest('[data-tsx]'), a = e.target.closest('[data-tsadd]'), g = e.target.closest('[data-tsg]');
+      if (x) { var l = tsSel(key).filter(function (k) { return k !== x.getAttribute('data-tsx'); }); VIEW.charts[key] = l.length ? l : tsSel(key); tsDraw(key); }
+      else if (g) { t.grain = g.getAttribute('data-tsg'); tsLoad(key); }
+      else if (a) tsMenu(key, a);
+    };
+    if (t.chart) { t.chart.destroy(); t.chart = null; }
+    if (typeof Chart === 'undefined' || !res || !res.rows || !res.rows.length) return;
+    var pi = 0; res.columns.forEach(function (c, i) { if (c.k === 'period') pi = i; });
+    var used = {};
+    var ds = sel.map(function (k, i) {
+      var ci = -1; res.columns.forEach(function (c, j) { if (c.k === k) ci = j; });
+      var u = byK[k].t, ax = TS_AX[u] || 'yc'; used[ax] = 1;
+      return { label: byK[k].l, data: res.rows.map(function (r) { var v = r[ci]; return v == null ? null : (u === 'pct' ? v * 100 : v); }), u: u,
+        borderColor: tsColor(i), backgroundColor: tsColor(i), yAxisID: ax, tension: .25, pointRadius: res.rows.length > 60 ? 0 : 2, spanGaps: true };
+    });
+    var scales = {}, side = 0;
+    ['yc', 'ym', 'yp', 'yx'].forEach(function (ax) {
+      if (!used[ax]) return;
+      scales[ax] = { position: side++ % 2 ? 'right' : 'left', beginAtZero: true, grid: { drawOnChartArea: side === 1 }, title: { display: true, text: TS_AXL[ax] } };
+    });
+    t.chart = new Chart(cv, {
+      type: 'line',
+      data: { labels: res.rows.map(function (r) { return r[pi]; }), datasets: ds },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { var u = ctx.dataset.u; return ctx.dataset.label + ': ' + fmt(u === 'pct' ? ctx.raw / 100 : ctx.raw, u); } } } },
+        scales: scales }
+    });
+  }
+  function tsMenu(key, anchor) {
+    var old = document.querySelector('.tsmenu'); if (old) { old.remove(); return; }
+    var cols = tsCols(TS[key].res), sel = tsSel(key);
+    var m = document.createElement('div'); m.className = 'tsmenu';
+    m.innerHTML = '<div class="muted small" style="padding:2px 6px 6px">Grafikte gösterilecek metrikler (en fazla 6)</div>' + cols.map(function (c) {
+      return '<label><input type="checkbox" data-k="' + esc(c.k) + '"' + (sel.indexOf(c.k) >= 0 ? ' checked' : '') + '>' + esc(c.l) + '</label>';
+    }).join('');
+    document.body.appendChild(m);
+    var r = anchor.getBoundingClientRect();
+    m.style.left = Math.min(r.left + window.scrollX, window.innerWidth - 240) + 'px'; m.style.top = (r.bottom + window.scrollY + 4) + 'px';
+    m.onchange = function (e) {
+      var k = e.target.getAttribute('data-k'); if (!k) return;
+      var l = tsSel(key).slice(), at = l.indexOf(k);
+      if (e.target.checked && at < 0) { if (l.length >= 6) { e.target.checked = false; return toast('En fazla 6 metrik'); } l.push(k); }
+      if (!e.target.checked && at >= 0 && l.length > 1) l.splice(at, 1);
+      VIEW.charts[key] = l; tsDraw(key);
+    };
+    setTimeout(function () {
+      document.addEventListener('click', function h(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('click', h); } });
+    }, 0);
+  }
+  /* ================= HEDEFLER ================= */
+  var TGT = { items: [], canEdit: false, res: null, seq: 0 };
+  var TGT_M = [['revenue', 'Satış tutarı', 'tot_revenue_usd', 'usd'], ['purchases', 'Satış adedi', 'tot_purchases', 'int'], ['sessions', 'Session', 'tot_sessions', 'int'], ['cost', 'Harcama', 'spend_usd', 'usd']];
+  function tDim(m) { var y = +m.slice(0, 4), mo = +m.slice(5, 7); return new Date(Date.UTC(y, mo, 0)).getUTCDate(); }
+  function tMonths(a, b) { var out = [], m = a.slice(0, 7); while (m <= b.slice(0, 7)) { out.push(m); var y = +m.slice(0, 4), mo = +m.slice(5, 7) + 1; if (mo > 12) { y++; mo = 1; } m = y + '-' + ('0' + mo).slice(-2); } return out; }
+  function tDays(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 864e5) + 1; }
+  function tGet(month, scope, metric) { for (var i = 0; i < TGT.items.length; i++) { var t = TGT.items[i]; if (t.month === month && t.scope === scope && t.metric === metric) return t.target; } return null; }
+  /** Bu tarih aralığında gösterilecek (kapsam, metrik) çiftleri: platform filtresi yoksa Toplam + tüm mecralar, varsa seçili mecralar. */
+  function tCards() {
+    var months = tMonths(S.from, S.to), sel = S.f.platforms, out = [], seen = {};
+    TGT.items.forEach(function (t) {
+      if (months.indexOf(t.month) < 0) return;
+      if (t.scope === 'Toplam' ? sel.length : sel.length && sel.indexOf(t.scope) < 0) return;
+      var k = t.scope + '|' + t.metric; if (seen[k]) return; seen[k] = 1; out.push({ scope: t.scope, metric: t.metric });
+    });
+    var mo = {}; TGT_M.forEach(function (m, i) { mo[m[0]] = i; });
+    out.sort(function (a, b) { return (a.scope === 'Toplam' ? 0 : 1) - (b.scope === 'Toplam' ? 0 : 1) || a.scope.localeCompare(b.scope, 'tr') || mo[a.metric] - mo[b.metric]; });
+    return out;
+  }
+  function loadGoals() {
+    if (!tCards().length) { TGT.res = null; drawGoals(); return; }
+    var p = baseParams('platform', 'none'); delete p.cmp; p.filters.pick = null; p.dims = undefined;
+    var my = ++TGT.seq;
+    fetchQuery(p, true).then(function (res) { if (my === TGT.seq) { TGT.res = res; drawGoals(); } }).catch(function () {});
+    drawGoals();
+  }
+  function tActual(res, scope, col) {
+    if (!res) return null;
+    var idx = {}; res.columns.forEach(function (c, i) { idx[c.k] = i; });
+    if (idx[col] == null) return null;
+    if (scope === 'Toplam') { var off = res.columns.length - res.totals.length; return res.totals[idx[col] - off]; }
+    var rows = res.rows.filter(function (r) { return r[idx.platform] === scope; });
+    if (!rows.length) return 0;
+    var t = totalsFor(res, rows, false); return t[idx[col]];
+  }
+  function drawGoals() {
+    var cards = tCards(), add = false ? '<button class="goal-add" id="goalAdd" title="Satış, session ve harcama hedefi gir">🎯 ' + (TGT.items.length ? 'Hedefler' : 'Hedef ekle') + '</button>' : '';
+    if (!cards.length) { gSet('', add); return; }
+    var months = tMonths(S.from, S.to), one = months.length === 1 ? months[0] : '', res = TGT.res;
+    var mtd = one && S.from === one + '-01' && S.to === B.dataEnd && S.to.slice(8) < ('0' + tDim(one)).slice(-2);
+    var gh = cards.map(function (c) {
+      var md = TGT_M.filter(function (m) { return m[0] === c.metric; })[0];
+      var tgt = 0, full = 0, have = 0;
+      months.forEach(function (m) {
+        var v = tGet(m, c.scope, c.metric); if (v == null) return; have++;
+        var a = S.from > m + '-01' ? S.from : m + '-01', e = m + '-' + ('0' + tDim(m)).slice(-2), b = S.to < e ? S.to : e;
+        tgt += v * tDays(a, b) / tDim(m); full += v;
+      });
+      var act = tActual(res, c.scope, md[2]), base = mtd ? full : tgt, cost = c.metric === 'cost';
+      var pct = act != null && base ? act / base : null, exp = mtd ? tDays(S.from, S.to) / tDim(one) : 1;
+      var ratio = pct == null ? null : pct / exp, cls = ratio == null ? '' : cost ? (ratio > 1.05 ? 'neg' : ratio >= 0.9 ? 'pos' : 'warn') : (ratio >= 1 ? 'pos' : ratio >= 0.9 ? 'warn' : 'neg');
+      var w = pct == null ? 0 : Math.max(0, Math.min(100, pct * 100));
+      var foot = mtd ? 'Ay hedefi · beklenen %' + NF0.format(exp * 100) + (act != null ? ' · ay sonu tahmini ' + kpiFmt(act / exp, md[3]) + ' (%' + NF0.format(pct / exp * 100) + ')' : '')
+        : one && S.from === one + '-01' && S.to.slice(8) === ('0' + tDim(one)).slice(-2) ? 'Ay hedefi'
+        : 'Dönem hedefi (gün oranlı' + (have < months.length ? '; ' + (months.length - have) + ' ayda hedef yok' : '') + ')';
+      return '<div class="goal ' + cls + '" title="' + esc(md[1] + ' · ' + c.scope + ': ' + fmt(act, md[3]) + ' / ' + fmt(base, md[3])) + '">' +
+        '<div class="gh"><span>' + esc(md[1]) + ' hedefi</span>' + (c.scope !== 'Toplam' ? '<span class="gs">' + esc(c.scope) + '</span>' : '') + '</div>' +
+        '<div class="gv"><b>' + (pct == null ? '…' : '%' + NF0.format(pct * 100)) + '</b><span>' + (act == null ? '' : kpiFmt(act, md[3])) + ' / ' + kpiFmt(base, md[3]) + '</span></div>' +
+        '<div class="gbar"><i style="width:' + w + '%"></i>' + (mtd ? '<s style="left:' + Math.min(100, exp * 100) + '%" title="Bugüne kadar beklenen"></s>' : '') + '</div>' +
+        '<div class="gf">' + foot + '</div></div>';
+    }).join('');
+    gSet(gh, add);
+  }
+  function gSet(gh, add) {
+    var a = $('adsGoals'), t = $('tgGoals');
+    if (a) a.innerHTML = gh ? '<div class="goal-grid">' + gh + (add ? '<div class="goal goal-edit">' + add + '</div>' : '') + '</div>' : (add ? '<div class="goal-bar">' + add + '</div>' : '');
+    if (t) t.innerHTML = gh ? '<div class="goal-grid">' + gh + '</div>' : '<div class="muted small tempty">Seçili tarih aralığında hedef yok. Aşağıdan aylık hedef ekleyebilirsin.</div>';
+    tBind();
+  }
+  function tBind() { var b = $('goalAdd'); if (b) b.onclick = function () { showTab('targets'); }; }
+  function loadTargets() {
+    call('apiTargets', '', null, true).then(function (r) { TGT.items = r.items || []; TGT.canEdit = !!r.canEdit; loadGoals(); }).catch(function () {});
+  }
+  function openTargets() {
+    document.querySelectorAll('.tsym').forEach(function (x) { x.textContent = SYM(); });
+    $('tScope').innerHTML = ['Toplam'].concat(B.platforms || []).map(function (p) { return '<option value="' + esc(p) + '">' + esc(p === 'Toplam' ? 'Toplam (tüm mecralar)' : p) + '</option>'; }).join('');
+    if (!$('tMonth').value) $('tMonth').value = (B.dataEnd || S.to).slice(0, 7);
+    tFill(); tListDraw(); $('tMsg').textContent = '';
+    $('tMonth').onchange = $('tScope').onchange = tFill;
+    $('tCopy').onclick = function () {
+      var m = $('tMonth').value; if (!m) return;
+      var y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1; if (!mo) { y--; mo = 12; } var pm = y + '-' + ('0' + mo).slice(-2), any = 0;
+      TGT_M.forEach(function (d) { var v = tGet(pm, $('tScope').value, d[0]); if (v != null) { $('t_' + d[0]).value = v; any++; } });
+      $('tMsg').textContent = any ? pm + ' hedefleri kopyalandı; kaydetmeyi unutma.' : pm + ' için bu kapsamda hedef yok.';
+    };
+    $('tSave').onclick = function () {
+      var vals = {}; TGT_M.forEach(function (d) { vals[d[0]] = $('t_' + d[0]).value.trim(); });
+      tSave({ month: $('tMonth').value, scope: $('tScope').value, vals: vals }, 'Kaydedildi.');
+    };
+  }
+  function tSave(o, okMsg) {
+    $('tMsg').textContent = 'Kaydediliyor…';
+    call('apiSaveTargets', JSON.stringify(o), null, true).then(function (r) {
+      TGT.items = r.items || []; $('tMsg').textContent = okMsg; tFill(); tListDraw(); loadGoals();
+    }).catch(function (e) { $('tMsg').textContent = e.message || e; });
+  }
+  function tFill() { var m = $('tMonth').value, sc = $('tScope').value; TGT_M.forEach(function (d) { var v = tGet(m, sc, d[0]); $('t_' + d[0]).value = v == null ? '' : v; }); }
+  function tListDraw() {
+    var g = {}, order = [];
+    TGT.items.forEach(function (t) { var k = t.month + '|' + t.scope; if (!g[k]) { g[k] = { month: t.month, scope: t.scope, v: {}, by: t.by }; order.push(k); } g[k].v[t.metric] = t.target; });
+    if (!order.length) { $('tList').innerHTML = '<div class="muted small">Henüz hedef yok.</div>'; return; }
+    $('tList').innerHTML = '<table class="stat"><thead><tr><th class="t">Ay</th><th class="t">Kapsam</th>' + TGT_M.map(function (d) { return '<th>' + esc(d[1]) + '</th>'; }).join('') + '<th class="t">Giren</th><th></th></tr></thead><tbody>' +
+      order.map(function (k) {
+        var o = g[k];
+        return '<tr><td class="t">' + esc(o.month) + '</td><td class="t">' + esc(o.scope) + '</td>' + TGT_M.map(function (d) { return '<td>' + (o.v[d[0]] == null ? '–' : fmt(o.v[d[0]], d[3])) + '</td>'; }).join('') +
+          '<td class="t muted small">' + esc(o.by) + '</td><td class="t"><a href="#" data-te="' + esc(k) + '">düzenle</a> · <a href="#" data-td="' + esc(k) + '">sil</a></td></tr>';
+      }).join('') + '</tbody></table>';
+    $('tList').onclick = function (e) {
+      var a = e.target.closest('[data-te],[data-td]'); if (!a) return; e.preventDefault();
+      var k = (a.getAttribute('data-te') || a.getAttribute('data-td')).split('|');
+      if (a.hasAttribute('data-te')) { $('tMonth').value = k[0]; $('tScope').value = k[1]; tFill(); $('tMsg').textContent = ''; }
+      else tSave({ month: k[0], scope: k[1], del: true }, k[0] + ' · ' + k[1] + ' hedefleri silindi.');
+    };
+  }
+  function kpiDelta(x) {
+    if (x.p == null || bad(x.v) || bad(x.p) || !x.p) return '';
+    var d = (x.v - x.p) / Math.abs(x.p), cls = '';
+    if (Math.abs(d) >= 0.005 && !cmpNeu(x.c)) cls = (d > 0) !== cmpInv(x.c) ? 'pos' : 'neg';
+    return '<div class="dl ' + cls + '" title="' + esc(cmpLabel() + ': ' + fmt(x.p, x.c.t)) + '">' + (d >= 0 ? '▲ ' : '▼ ') + NF2.format(Math.abs(d) * 100) + '%</div>';
+  }
+
+  /* ================= KREATİF ================= */
+  var CRS = { merge: 'on', src: 'all', plat: 'all', status: 'active', sort: 's', q: '', view: 'cards', res: null, stale: true, n: 60, tsort: null };
+  var crSeq = 0;
+  function initCreative() {
+    seg($('crPlat'), [['all', 'Tüm mecralar'], ['Meta', 'Meta'], ['Google Ads', 'Google Ads'], ['Yandex Direct', 'Yandex'], ['RTB House', 'RTB House']], CRS.plat, function (v) { CRS.plat = v; CRS.n = 60; drawCreative(); });
+    seg($('crStatus'), [['active', 'Aktif'], ['all', 'Tümü']], CRS.status, function (v) { CRS.status = v; loadCreative(); });
+    seg($('crMerge'), [['on', 'Birleşik'], ['off', 'Ayrı ayrı']], CRS.merge, function (v) { CRS.merge = v; CRS.n = 60; drawCreative(); });
+    seg($('crSrc'), [['all', 'Tüm kaynaklar'], ['adv', 'Eklenen'], ['auto', 'Otomatik']], CRS.src, function (v) { CRS.src = v; CRS.n = 60; drawCreative(); });
+    seg($('crView'), [['cards', 'Görseller'], ['table', 'Tablo'], ['texts', 'Metinler']], CRS.view, function (v) { CRS.view = v; drawCreative(); });
+    $('crSort').onchange = function () { CRS.sort = this.value; CRS.n = 60; drawCreative(); };
+    var tq = null; $('crQ').oninput = function () { var v = this.value; clearTimeout(tq); tq = setTimeout(function () { CRS.q = v.toLowerCase().trim(); CRS.n = 60; drawCreative(); }, 200); };
+    $('crMore').onclick = function () { CRS.n += 60; drawCreative(); };
+    $('crCsv').onclick = function () {
+      var L = crList(); if (!L.length) return;
+      var H = ['Mecra', 'Hesap', 'Kampanya', 'Reklam grubu / seti', 'Reklam', 'Ad ID', 'Durum', 'Tür', 'Harcama', 'Gösterim', 'Tıklama', 'CTR', 'CPC', 'Dönüşüm', 'Dönüşüm değeri', 'ROAS', 'CPA', 'İlk gün', 'Son gün', 'Önizleme'];
+      var rows = [H].concat(L.map(function (x) { return [x.p, x.acc, x.c, x.g, x.n, x.id, x.st || '', x.ty || '', x.s, x.i, x.k, x.ctr, x.cpc, x.cv, x.v, x.roas, x.cpa, x.f, x.l, x.pv || x.pl || '']; }));
+      downloadCsv(rows, 'kreatifler');
+    };
+  }
+  function loadCreative() {
+    var my = ++crSeq; CRS.stale = false;
+    call('apiCreative', JSON.stringify({ from: S.from, to: S.to, status: CRS.status }), 'Kreatifler yükleniyor…').then(function (res) {
+      if (my !== crSeq) return;
+      res.items.forEach(crDerive); CRS.res = res; CRS.n = 60; drawCreative();
+    }).catch(fail);
+  }
+  function crDerive(x) { if (x.p === 'Google Ads' && /^(Görsel|YouTube) \S+$/.test(x.n || '')) x.n = (CR_FT[x.ty] || (x.vi ? 'Video' : 'Görsel')) + (x.g ? ' · ' + x.g : ''); x.ctr = div(x.k, x.i); x.cpc = div(x.s, x.k); x.roas = div(x.v, x.s); x.cpa = div(x.s, x.cv); return x; }
+  function crList() {
+    if (!CRS.res) return [];
+    var L = CRS.res.items.filter(function (x) {
+      if (CRS.plat !== 'all' && x.p !== CRS.plat) return false;
+      if (CRS.src !== 'all' && (crAuto(x) ? 'auto' : 'adv') !== CRS.src) return false;
+      if (CRS.q && (x.n + ' ' + x.c + ' ' + x.g + ' ' + (x.ti || '') + ' ' + x.id).toLowerCase().indexOf(CRS.q) < 0) return false;
+      return true;
+    });
+    if (CRS.merge === 'on') L = crGroups(L);
+    var k = CRS.sort;
+    L.sort(function (a, b) {
+      if (k === 'f') return (b.cr || b.f) < (a.cr || a.f) ? -1 : 1;
+      if (k === 'cpa') { var x = a.cpa == null ? 1e18 : a.cpa, y = b.cpa == null ? 1e18 : b.cpa; return x - y; }
+      return (b[k] || 0) - (a[k] || 0);
+    });
+    return L;
+  }
+  var CR_ST = { ACTIVE: 'Aktif', PAUSED: 'Durduruldu', CAMPAIGN_PAUSED: 'Kampanya durdu', ADSET_PAUSED: 'Set durdu', ARCHIVED: 'Arşiv', DELETED: 'Silindi', DISAPPROVED: 'Reddedildi',
+    PENDING_REVIEW: 'İncelemede', WITH_ISSUES: 'Sorunlu', IN_PROCESS: 'İşleniyor', INACTIVE: 'Pasif' };
+  var CR_MAP = {};
+  function crReg(x) { var k = x.p + '|' + x.id; CR_MAP[k] = x; return k; }
+  function crOpen(x) {
+    if (!x) return;
+    var img = x.im || x.th, body;
+    if (x.vi && x.p === 'Google Ads') body = '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(x.vi) + '?autoplay=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+    else if (!img && x.hu) body = '<iframe class="crlb-html" src="' + esc(x.hu) + '" scrolling="no" style="width:' + (x.hw || 300) + 'px;height:' + (x.hh || 250) + 'px"></iframe>';
+    else if (img) body = '<img src="' + esc(img) + '" referrerpolicy="no-referrer" alt="">';
+    else body = '<div class="cr-text crlb-text">' + esc(x.ti || x.bo || x.n || '') + '</div>';
+    var links = (x.pv ? '<a href="' + esc(x.pv) + '" target="_blank" rel="noopener">' + (x.vi && x.p === 'Meta' ? 'Videoyu izle ↗' : 'Önizleme ↗') + '</a>' : '') +
+      (x.pl ? '<a href="' + esc(x.pl) + '" target="_blank" rel="noopener">Instagram ↗</a>' : '') + (img && !x.vi ? '<a href="' + esc(img) + '" target="_blank" rel="noopener">Tam boyut ↗</a>' : '');
+    if (x.grp) {
+      links += '<div class="crlb-vars"><table class="stat"><thead><tr><th class="t"></th><th class="t">Varyasyon</th><th class="t">Mecra · Kampanya › Grup</th><th>Harcama</th><th>Gösterim</th><th>CTR</th><th>Dönüşüm</th><th>ROAS</th></tr></thead><tbody>' +
+        x.grp.map(function (v, i) {
+          var ti = v.th || v.im;
+          return '<tr data-var="' + i + '"><td class="t">' + (ti ? '<img class="cr-th" referrerpolicy="no-referrer" src="' + esc(ti) + '">' : '') + '</td><td class="t">' + esc(crSize(v)) + '<div class="muted small">' + esc(v.n || v.id) + '</div></td>' +
+            '<td class="t">' + esc(v.p + ' · ' + v.c + (v.g ? ' › ' + v.g : '')) + '</td><td>' + fmt(v.s, 'usd') + '</td><td>' + fmt(v.i, 'int') + '</td><td>' + fmt(v.ctr, 'pct') + '</td><td>' + fmt(v.cv, 'num') + '</td><td>' + fmt(v.roas, 'x') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    var el = document.createElement('div');
+    el.className = 'crlb';
+    el.innerHTML = '<div class="crlb-box"><button class="crlb-x" title="Kapat">×</button>' + (x.back ? '<button class="crlb-back">‹ Tüm varyasyonlar</button>' : '') + body +
+      '<div class="crlb-cap"><b>' + esc(x.n || x.id) + '</b><span class="muted">' + esc(x.p + ' · ' + x.c + (x.g ? ' › ' + x.g : '')) + '</span>' +
+      '<span>Harcama <b>' + fmt(x.s, 'usd') + '</b> · CTR <b>' + fmt(x.ctr, 'pct') + '</b> · ROAS <b>' + fmt(x.roas, 'x') + '</b></span>' + links + '</div></div>';
+    var close = function () { el.remove(); document.removeEventListener('keydown', onKey); };
+    var onKey = function (e) { if (e.key === 'Escape') close(); };
+    el.onclick = function (e) {
+      if (e.target === el || e.target.closest('.crlb-x')) return close();
+      var tr = e.target.closest('[data-var]');
+      if (tr && x.grp) { var v = x.grp[+tr.getAttribute('data-var')]; close(); crOpen(Object.assign({}, v, { back: x })); return; }
+      if (e.target.closest('.crlb-back') && x.back) { close(); crOpen(x.back); }
+    };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(el);
+  }
+  document.addEventListener('click', function (e) {
+    var m = e.target.closest && e.target.closest('[data-crk]');
+    if (!m || e.target.closest('a')) return;
+    crOpen(CR_MAP[m.getAttribute('data-crk')]);
+  });
+  /* ---- aynı içerikli kreatifleri birleştir: aynı video / aynı varlık / aynı görsel dosyası / boyut eki atılmış aynı ad ---- */
+  var CR_SIZE_RE = /\b\d{2,4}\s*[x×]\s*\d{2,4}\b|\b(1x1|4x5|9x16|16x9|1[.,]91x1|2x3|3x4|4x3)\b/i;
+  function crNorm(n) {
+    var s = String(n || '').toLowerCase().replace(/\.(jpe?g|png|gif|webp|mp4|mov|html?)$/, '').replace(/^\d{1,3}-/, '');
+    s = s.replace(/\b\d{2,4}\s*[x×]\s*\d{2,4}\b/g, ' ').replace(/\b(1x1|4x5|9x16|16x9|1[.,]91x1|2x3|3x4|4x3)\b/g, ' ')
+      .replace(/\b(square|kare|dikey|yatay|portrait|landscape|vertical|horizontal|story|stories|reels?|feed|banner|copy|kopya)\b/g, ' ').replace(/[_\-\s.()]+/g, ' ').trim();
+    return s;
+  }
+  function crKey(x) {
+    if (x.vi) return 'v:' + x.vi;
+    if (x.p === 'Google Ads') return 'g:' + String(x.id).split('@')[0];
+    if (x.im) return 'u:' + String(x.im).split('?')[0];
+    return 'i:' + x.p + ':' + x.id;
+  }
+  function crSize(x) {
+    var m = CR_SIZE_RE.exec(x.n || '');
+    if (x.p === 'Google Ads') return (CR_FT[x.ty] || x.ty || 'Görsel') + (m ? ' · ' + m[0] : '');
+    return m ? m[0] : (x.vi ? 'Video' : 'Görsel');
+  }
+  function crGroups(L) {
+    var par = {};
+    var fnd = function (a) { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    var uni = function (a, b) { if (!(a in par)) par[a] = a; if (!(b in par)) par[b] = b; a = fnd(a); b = fnd(b); if (a !== b) par[b] = a; };
+    L.forEach(function (x, i) {
+      var me = 'x' + i; par[me] = me;
+      uni('k:' + crKey(x), me);
+      var n = crNorm(x.n);
+      if (n.length >= 6 && !/^(görsel|video|youtube|image|resim|reklam|yeni|new|ad)\b/.test(n) && !/^[\d\s]+$/.test(n)) uni('n:' + n, me);
+    });
+    var g = {}, order = [];
+    L.forEach(function (x, i) { var r = fnd('x' + i); if (!g[r]) { g[r] = []; order.push(r); } g[r].push(x); });
+    return order.map(function (r) {
+      var m = g[r]; if (m.length === 1) return m[0];
+      m.sort(function (a, b) { return b.s - a.s; });
+      var rep = m.filter(function (x) { return x.im || x.th; })[0] || m[0];
+      var t = { grp: m, id: 'G:' + rep.p + ':' + rep.id, s: 0, i: 0, k: 0, cv: 0, v: 0, a: 0, f: rep.f, l: rep.l, act: false };
+      ['n', 'c', 'g', 'th', 'im', 'vi', 'pv', 'pl', 'ty', 'st', 'cr', 'acc'].forEach(function (q) { t[q] = rep[q]; });
+      var plats = {}, auto = true;
+      m.forEach(function (x) {
+        t.s += x.s; t.i += x.i; t.k += x.k; t.cv += x.cv; t.v += x.v; t.a += x.a || 0; plats[x.p] = 1;
+        if (x.f < t.f) t.f = x.f; if (x.l > t.l) t.l = x.l; if (x.act) t.act = true; if (!/AUTOMATIC/i.test(x.src || '')) auto = false;
+      });
+      t.p = Object.keys(plats).join(' + '); t.src = auto ? 'AUTOMATICALLY_CREATED' : (rep.src || '');
+      var camps = {}; m.forEach(function (x) { camps[x.c] = 1; }); if (Object.keys(camps).length > 1) t.c = Object.keys(camps).length + ' kampanya';
+      return crDerive(t);
+    });
+  }
+  function crAuto(x) { return /AUTOMATIC/i.test(x.src || ''); }
+  function crHtml(x) {
+    var w = x.hw || 300, h = x.hh || 250, k = Math.min(230 / w, 230 / h);
+    return '<div class="cr-html-wrap"><iframe class="cr-html" src="' + esc(x.hu) + '" loading="lazy" scrolling="no" tabindex="-1" style="width:' + w + 'px;height:' + h + 'px;transform:translate(-50%,-50%) scale(' + k + ')"></iframe></div>';
+  }
+  function crCard(x) {
+    var img = x.im || x.th, media = img ? '<img loading="lazy" referrerpolicy="no-referrer" src="' + esc(img) + '" onerror="' + (x.p === 'Google Ads' ? 'var c=this.closest(\'.cr-card\');if(c)c.remove()' : 'this.parentNode.classList.add(\'noimg\');this.remove()') + '"' + (x.p === 'Google Ads' && x.vi ? ' onload="if(this.naturalWidth<=120){var c=this.closest(\'.cr-card\');if(c)c.remove()}"' : '') + '>'
+      : (x.hu ? crHtml(x) : '<div class="cr-text">' + esc(x.ti || x.n || x.ty || 'Reklam') + '</div>');
+    var link = x.pv ? '<a href="' + esc(x.pv) + '" target="_blank" rel="noopener">Önizleme ↗</a>' : '';
+    if (x.pl) link += '<a href="' + esc(x.pl) + '" target="_blank" rel="noopener">Instagram ↗</a>';
+    var cvL = x.p === 'Meta' ? 'Purchase' : 'Dönüşüm';
+    return '<div class="cr-card"><div class="cr-media" data-crk="' + esc(crReg(x)) + '">' + media + (x.vi ? '<span class="cr-play">▶</span>' : '') + (x.grp ? '<span class="cr-cnt">' + x.grp.length + ' varyasyon</span>' : '') + (/Google Ads/.test(x.p) && x.src ? '<span class="cr-src' + (crAuto(x) ? ' auto' : '') + '">' + (crAuto(x) ? 'Otomatik' : 'Eklenen') + '</span>' : '') +
+      '<span class="cr-badge">' + esc(x.p) + (x.ty ? ' · ' + esc(CR_FT[x.ty] || String(x.ty).replace(/_AD$/, '').replace(/_/g, ' ').toLowerCase()) : '') + '</span>' +
+      '</div>' +
+      '<div class="cr-body"><div class="cr-name" title="' + esc(x.n) + '">' + esc(x.n || x.id) + '</div><div class="cr-sub" title="' + esc(x.c + ' › ' + x.g) + '">' + esc(x.c) + (x.p === 'Google Ads' && x.g ? ' › ' + esc(x.g) : '') + '</div>' +
+      '<div class="cr-m"><div><span>Harcama</span><b>' + kpiFmt(x.s, 'usd') + '</b></div><div><span>Gösterim</span><b>' + fmtShort(x.i, 'int') + '</b></div><div><span>CTR</span><b>' + fmt(x.ctr, 'pct') + '</b></div>' +
+      '<div><span>' + cvL + '</span><b>' + fmt(x.cv, 'num') + '</b></div><div><span>ROAS</span><b>' + fmt(x.roas, 'x') + '</b></div><div><span>CPA</span><b>' + kpiFmt(x.cpa, 'usd') + '</b></div></div>' +
+      (link ? '<div class="cr-links">' + link + '</div>' : '') + '</div></div>';
+  }
+  var CR_FT = { HEADLINE: 'Başlık', LONG_HEADLINE: 'Uzun başlık', DESCRIPTION: 'Açıklama', BUSINESS_NAME: 'İşletme adı', CALL_TO_ACTION_SELECTION: 'CTA',
+    MARKETING_IMAGE: 'Görsel (yatay)', SQUARE_MARKETING_IMAGE: 'Görsel (kare)', PORTRAIT_MARKETING_IMAGE: 'Görsel (dikey)', LOGO: 'Logo', LANDSCAPE_LOGO: 'Logo (yatay)',
+    YOUTUBE_VIDEO: 'Video', AD_IMAGE: 'Görsel uzantısı', IMAGE: 'Görsel', TALL_PORTRAIT_MARKETING_IMAGE: 'Görsel (uzun dikey)',
+    SITELINK: 'Sitelink', CALLOUT: 'Ek açıklama (callout)', STRUCTURED_SNIPPET: 'Yapılandırılmış snippet', PROMOTION: 'Promosyon', PRICE: 'Fiyat', MOBILE_APP: 'Uygulama', CALL: 'Arama' };
+  function crFt(ft) { var p = String(ft || '').split(':'), b = CR_FT[p[0]] || p[0]; return p[1] ? b + ' (sabit ' + p[1].replace(/\D/g, '') + ')' : b; }
+  var CRT = { sort: null, page: 0, sel: {} };
+  function drawCrTexts(el) {
+    var T = (CRS.res.texts || []).filter(function (x) {
+      if (CRS.plat !== 'all' && x.p !== CRS.plat) return false;
+      return !CRS.q || (x.t + ' ' + x.ft).toLowerCase().indexOf(CRS.q) >= 0;
+    });
+    $('crMore').classList.add('hidden');
+    el.className = '';
+    if (!T.length) { el.innerHTML = '<div class="muted" style="padding:20px">Bu filtrede metin yok.' + (CRS.res.gAssets ? '' : ' Google Ads metinleri yeni script ile gelecek.') + '</div>'; return; }
+    var tot = { i: 0, k: 0, s: 0, cv: 0, v: 0 };
+    T.forEach(function (x) { tot.i += x.i; tot.k += x.k; tot.s += x.s; tot.cv += x.cv; tot.v += x.v; });
+    var res = {
+      columns: [{ k: 'text', l: 'Metin', t: 'text' }, { k: 'ftype', l: 'Tür', t: 'text' }, { k: 'platform', l: 'Mecra', t: 'text' },
+        { k: 'nc', l: 'Kampanya', t: 'int' }, { k: 'impressions', l: 'Gösterim', t: 'int' }, { k: 'clicks', l: 'Tıklama', t: 'int' }, { k: 'ctr', l: 'CTR', t: 'pct', d: true },
+        { k: 'spend_usd', l: 'Harcama', t: 'usd' }, { k: 'conversions', l: 'Dönüşüm', t: 'num' }, { k: 'conv_value', l: 'Değer', t: 'usd' }, { k: 'roas', l: 'ROAS', t: 'x', d: true }],
+      rows: T.slice(0, 5000).map(function (x) { return [x.t, crFt(x.ft), x.p, x.nc, x.i, x.k, div(x.k, x.i), x.s, x.cv, x.v, div(x.v, x.s)]; }),
+      totals: [null, tot.i, tot.k, div(tot.k, tot.i), tot.s, tot.cv, tot.v, div(tot.v, tot.s)]
+    };
+    el.innerHTML = '<div class="muted small appnote">Google Ads: PMax ve RSA başlık / açıklamaları (sabitlenenler ayrıca belirtilir), sitelink, callout, snippet ve promosyon uzantıları. Rakamlar varlık bazlı; bir gösterimde birden çok metin yer aldığı için toplamlar sadece fikir verir. Meta: primary text, headline ve description (dinamik / Advantage+ varyasyonları dahil); rakamlar o metni kullanan reklamların toplamı.</div><div class="tablewrap" id="crTxtTable"></div>';
+    renderTable($('crTxtTable'), res, CRT, {});
+  }
+  function drawCreative() {
+    var res = CRS.res, L = crList();
+    $('crWarn').textContent = res && res.warnings ? res.warnings.join(' · ') : '';
+    $('crNote').textContent = res ? 'Panel verisi (mecraların kendi bildirdiği dönüşüm ve değer). ' + res.active + ' aktif / ' + res.total + ' reklam bu dönemde yayında.' +
+      ' Meta görselleri ve durumları günde bir yenilenir' + (res.synced ? ' (son: ' + String(res.synced).slice(0, 16) + ')' : ' (ilk senkron bekleniyor)') + '. Google Ads: PMax asset grubu, Demand Gen / Display ve Search görsel uzantılarındaki her görsel ve video ayrı kart (son 7 günde gösterim alan = aktif)' + (res.gAssets ? '' : ' — yeni Google Ads script\'i kurulunca gelecek') + '. Metinler "Metinler" görünümünde.' : '';
+    var T = { n: L.length, s: 0, i: 0, k: 0, cv: 0, v: 0 };
+    L.forEach(function (x) { T.s += x.s; T.i += x.i; T.k += x.k; T.cv += x.cv; T.v += x.v; });
+    kpis($('crKpis'), res ? { columns: [{ k: 'n', l: 'Kreatif', t: 'int' }, { k: 's', l: 'Harcama', t: 'usd' }, { k: 'i', l: 'Gösterim', t: 'int' }, { k: 'ctr', l: 'CTR', t: 'pct' },
+      { k: 'cpc', l: 'CPC', t: 'usd' }, { k: 'cv', l: 'Dönüşüm (panel)', t: 'num' }, { k: 'v', l: 'Değer (panel)', t: 'usd' }, { k: 'roas', l: 'ROAS (panel)', t: 'x' }],
+      totals: [T.n, T.s, T.i, div(T.k, T.i), div(T.s, T.k), T.cv, T.v, div(T.v, T.s)] } : null, ['n', 's', 'i', 'ctr', 'cpc', 'cv', 'v', 'roas']);
+    var el = $('crGrid');
+    if (!res) { el.innerHTML = ''; return; }
+    if (CRS.view === 'texts') { drawCrTexts(el); return; }
+    if (!L.length) { el.className = ''; el.innerHTML = '<div class="muted" style="padding:20px">Bu filtrede kreatif yok.</div>'; $('crMore').classList.add('hidden'); return; }
+    if (CRS.view === 'cards') {
+      el.className = 'cr-grid';
+      el.innerHTML = L.slice(0, CRS.n).map(crCard).join('');
+      $('crMore').classList.toggle('hidden', L.length <= CRS.n);
+      $('crMore').textContent = 'Daha fazla göster (' + (L.length - CRS.n) + ' kaldı)';
+    } else {
+      el.className = 'tablewrap';
+      var C = [['n', 'Kreatif', 't'], ['p', 'Mecra', 't'], ['c', 'Kampanya', 't'], ['s', 'Harcama', 'usd'], ['i', 'Gösterim', 'int'], ['k', 'Tıklama', 'int'], ['ctr', 'CTR', 'pct'],
+        ['cpc', 'CPC', 'usd'], ['cv', 'Dönüşüm', 'num'], ['v', 'Değer', 'usd'], ['roas', 'ROAS', 'x'], ['cpa', 'CPA', 'usd']];
+      var rows = L.slice(0, CRS.n * 5);
+      el.innerHTML = '<table class="stat cr-tbl"><thead><tr>' + C.map(function (c) { return '<th class="' + (c[2] === 't' ? 't' : '') + '" data-crs="' + c[0] + '">' + c[1] + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        rows.map(function (x) {
+          return '<tr>' + C.map(function (c) {
+            if (c[0] === 'n') { var img = x.th || x.im; return '<td class="t">' + (img ? '<img class="cr-th" data-crk="' + esc(crReg(x)) + '" loading="lazy" referrerpolicy="no-referrer" src="' + esc(img) + '" onerror="this.remove()">' : '') + (x.pv ? '<a href="' + esc(x.pv) + '" target="_blank" rel="noopener">' + esc(x.n || x.id) + '</a>' : esc(x.n || x.id)) + '</td>'; }
+            if (c[0] === 'st') return '<td class="t">' + esc(CR_ST[x.st] || (x.act ? 'Aktif' : x.st || 'Pasif')) + '</td>';
+            if (c[2] === 't') return '<td class="t">' + esc(x[c[0]] || '') + '</td>';
+            return '<td>' + fmt(x[c[0]], c[2]) + '</td>';
+          }).join('') + '</tr>';
+        }).join('') + '</tbody></table>';
+      el.querySelector('thead').onclick = function (e) { var k = e.target.getAttribute('data-crs'); if (!k || /^(n|p|c|st)$/.test(k)) return; CRS.sort = k; $('crSort').value = k; drawCreative(); };
+      $('crMore').classList.toggle('hidden', L.length <= rows.length);
+      $('crMore').textContent = 'Daha fazla göster';
+    }
+  }
+
+  /* ================= TRENDYOL CPAS ================= */
+  var CPS = { level: 'campaign', grain: 'none', res: null, sort: null, page: 0, sel: {}, stale: true, cr: null };
+  var cpSeq = 0, cpDowChart = null;
+  function initCpas() {
+    seg($('cpLevel'), [['campaign', 'Kampanya'], ['adset', 'Reklam seti'], ['ad', 'Reklam']], CPS.level, function (v) { CPS.level = v; loadCpas(true); });
+    seg($('cpGrain'), GRAINS, CPS.grain, function (v) { CPS.grain = v; loadCpas(true); });
+    $('cpCsv').onclick = function () { if (CPS.res) downloadCsv(exportView(CPS.res, CPS, {}), 'trendyol_cpas'); };
+    $('cpExport').onclick = function () { if (CPS.res) exportSheet(exportView(CPS.res, CPS, {}), B.cpasLabel || 'CPAS'); };
+  }
+  function loadCpas(tableOnly) {
+    var my = ++cpSeq; CPS.stale = false;
+    call('apiCpas', JSON.stringify({ from: S.from, to: S.to, level: CPS.level, grain: CPS.grain, cmp: cmpParam() }), 'CPAS verisi yükleniyor…').then(function (res) {
+      if (my !== cpSeq) return;
+      CPS.res = res; CPS.sort = null; CPS.page = 0; TS.cpas.res = res.series; drawCpas();
+    }).catch(fail);
+    if (tableOnly && CPS.cr) return;
+    call('apiCreative', JSON.stringify({ from: S.from, to: S.to, status: 'all', cpas: true }), null, true).then(function (r) {
+      if (my !== cpSeq && !tableOnly) return;
+      r.items.forEach(crDerive); r.items.sort(function (a, b) { return b.v - a.v; }); CPS.cr = r; drawCpasCr();
+    }).catch(function () {});
+  }
+  function drawCpasCr() {
+    var r = CPS.cr, el = $('cpCr');
+    if (!r || !r.items.length) { el.className = ''; el.innerHTML = '<div class="muted small">Kreatif bilgisi henüz yok (Meta kreatif senkronu günde bir çalışır).</div>'; return; }
+    el.className = 'cr-grid small'; el.innerHTML = r.items.slice(0, 8).map(crCard).join('');
+  }
+  var DOW = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+  function cpasInsights(res) {
+    var T = {}, P = {}, off = res.columns.length - res.totals.length;
+    res.columns.forEach(function (c, i) { if (i >= off) { T[c.k] = res.totals[i - off]; P[c.k] = res.prevTotals ? res.prevTotals[i - off] : null; } });
+    if (!T.spend) return ['Seçilen dönemde bu hesapta harcama yok.'];
+    var out = [], ch = function (k) { if (!P[k]) return '–'; var d = (T[k] - P[k]) / Math.abs(P[k]); return (d >= 0 ? '+' : '−') + NF2.format(Math.abs(d) * 100) + '%'; };
+    out.push('<b>' + fmt(T.spend, 'usd') + '</b> harcamayla Trendyol\'da <b>' + fmt(T.purchase_value, 'usd') + '</b> satış (' + fmt(T.purchases, 'int') + ' adet) üretildi. ROAS <b>' + fmt(T.roas, 'x') + '</b>, marjin ' + fmt(T.margin, 'pct') + ', sipariş başı maliyet ' + fmt(T.cpa, 'usd') + ', ortalama sepet ' + fmt(T.aov, 'usd') + '.');
+    if (res.hasPrev) out.push('Önceki ' + res.days + ' güne göre (' + res.prevFrom + ' – ' + res.prevTo + '): harcama <b>' + ch('spend') + '</b>, satış tutarı <b>' + ch('purchase_value') + '</b>, sipariş ' + ch('purchases') + '; ROAS ' + fmt(P.roas, 'x') + ' → ' + fmt(T.roas, 'x') + ', CPA ' + fmt(P.cpa, 'usd') + ' → ' + fmt(T.cpa, 'usd') + '.');
+    var cs = (res.camps || []).filter(function (c) { return c[1] >= T.spend * 0.05; });
+    if (cs.length > 1) {
+      cs.sort(function (a, b) { return (div(b[2], b[1]) || 0) - (div(a[2], a[1]) || 0); });
+      var b = cs[0], w = cs[cs.length - 1];
+      out.push('En verimli kampanya <b>' + esc(b[0]) + '</b> (ROAS ' + fmt(div(b[2], b[1]), 'x') + ', harcamanın ' + fmt(b[1] / T.spend, 'pct') + '\'i). En düşük: ' + esc(w[0]) + ' (ROAS ' + fmt(div(w[2], w[1]), 'x') + ').');
+    }
+    var top = (res.camps || []).slice().sort(function (a, b) { return b[2] - a[2]; })[0];
+    if (top && T.purchase_value) out.push('Satış tutarının ' + fmt(top[2] / T.purchase_value, 'pct') + '\'i "' + esc(top[0]) + '" kampanyasından geldi.');
+    var wd = (res.weekday || []).filter(function (x) { return x[1] > 0; });
+    if (wd.length >= 5 && res.days >= 14) {
+      wd.sort(function (a, b) { return (div(b[2], b[1]) || 0) - (div(a[2], a[1]) || 0); });
+      out.push('Haftanın en verimli günü <b>' + DOW[wd[0][0]] + '</b> (ROAS ' + fmt(div(wd[0][2], wd[0][1]), 'x') + '), en zayıfı ' + DOW[wd[wd.length - 1][0]] + ' (ROAS ' + fmt(div(wd[wd.length - 1][2], wd[wd.length - 1][1]), 'x') + ').');
+    }
+    if (T.link_clicks) out.push('Link tıklamalarının ' + fmt(T.atc_rate, 'pct') + '\'i sepete ekleme, sepetlerin ' + fmt(T.cart_to_purchase, 'pct') + '\'i satın almaya dönüştü (tıklama → satış ' + fmt(T.cvr, 'pct') + '). CTR ' + fmt(T.ctr, 'pct') + ', CPC ' + fmt(T.cpc, 'usd') + '.');
+    var ad = (res.ads || [])[0];
+    if (ad && ad[4]) out.push('En çok satış getiren reklam: <b>' + esc(ad[1]) + '</b> (' + fmt(ad[4], 'usd') + ' satış, ROAS ' + fmt(div(ad[4], ad[3]), 'x') + ').');
+    return out;
+  }
+  function drawCpas() {
+    var res = CPS.res;
+    $('cpWarn').textContent = res && res.warnings ? res.warnings.join(' · ') : '';
+    kpis($('cpKpis'), res, kpiKeys('cpas'), 'cpas');
+    if (!res) return;
+    renderTable($('cpTable'), res, CPS, {});
+    var f = res.funnel || [], top = f.length ? f[0][1] : 0;
+    $('cpFunnel').innerHTML = f.map(function (s, i) {
+      var w = top ? Math.max(2, Math.sqrt(s[1] / top) * 100) : 0;
+      return '<div class="fn-row"><div class="fn-top"><span>' + esc(s[0]) + '</span><b>' + fmt(s[1], 'int') + '</b></div><div class="fn-bar" style="width:' + w + '%"></div>' +
+        (i ? '<div class="fn-rate">önceki adımdan ' + fmt(f[i - 1][1] ? s[1] / f[i - 1][1] : null, 'pct') + '</div>' : '') + '</div>';
+    }).join('');
+    var cs = res.camps || [];
+    $('cpCamps').innerHTML = cs.length ? '<table class="stat"><thead><tr><th class="t">Kampanya</th><th>Harcama</th><th>Satış</th><th>ROAS</th><th>Purchase</th><th>CPA</th></tr></thead><tbody>' +
+      cs.slice(0, 12).map(function (c) { return '<tr><td class="t">' + esc(c[0]) + '</td><td>' + fmt(c[1], 'usd') + '</td><td>' + fmt(c[2], 'usd') + '</td><td>' + fmt(div(c[2], c[1]), 'x') + '</td><td>' + fmt(c[3], 'int') + '</td><td>' + fmt(div(c[1], c[3]), 'usd') + '</td></tr>'; }).join('') + '</tbody></table>'
+      : '<div class="muted small">Veri yok</div>';
+    tsDraw('cpas');
+    if (cpDowChart) { cpDowChart.destroy(); cpDowChart = null; }
+    if (typeof Chart !== 'undefined' && res.weekday) {
+      var ord = [1, 2, 3, 4, 5, 6, 0], W = ord.map(function (i) { return res.weekday[i]; });
+      cpDowChart = new Chart($('cpDow'), {
+        data: { labels: ord.map(function (i) { return DOW[i].slice(0, 3); }), datasets: [
+          { type: 'bar', label: 'Harcama', data: W.map(function (w) { return Math.round(w[1]); }), backgroundColor: tsColor(0), yAxisID: 'ym', order: 2 },
+          { type: 'line', label: 'ROAS', data: W.map(function (w) { return div(w[2], w[1]); }), borderColor: tsColor(2), backgroundColor: tsColor(2), yAxisID: 'yx', tension: .3, order: 1 }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' },
+          tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + (c.dataset.yAxisID === 'ym' ? fmt(c.raw, 'usd') : fmt(c.raw, 'x')); } } } },
+          scales: { ym: { position: 'left', beginAtZero: true, title: { display: true, text: 'Harcama' } }, yx: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'ROAS' } } } }
+      });
+    }
+  }
+
+  /* ================= WEB (GA4) ================= */
+  var WEBS = { dims: ['channel'], grain: 'none', res: null, sort: null, page: 0, sel: {}, stale: true };
+  var WEB_DIM_OPTS = [['', 'Toplam'], ['channel', 'Kanal'], ['source_medium', 'Kaynak / Araç'], ['device', 'Cihaz'], ['user_type', 'Yeni / Geri dönen'], ['channel,device', 'Kanal × Cihaz']];
+  var webChart = null, webSeq = 0;
+  function initWeb() {
+    seg($('webDims'), WEB_DIM_OPTS, WEBS.dims.join(','), function (v) { WEBS.dims = v ? v.split(',') : []; loadWeb(); });
+    seg($('webGrain'), GRAINS, WEBS.grain, function (v) { WEBS.grain = v; loadWeb(); });
+    $('webCsv').onclick = function () { if (WEBS.res) downloadCsv(exportView(WEBS.res, WEBS, {}), 'web'); };
+    $('webExport').onclick = function () { if (WEBS.res) exportSheet(exportView(WEBS.res, WEBS, {}), 'Web · GA4'); };
+  }
+  function loadWeb() {
+    var my = ++webSeq; WEBS.stale = false; tsLoad('web');
+    call('apiWeb', JSON.stringify({ from: S.from, to: S.to, grain: WEBS.grain, dims: WEBS.dims, cmp: cmpParam() }), 'Web verisi yükleniyor…').then(function (res) {
+      if (my !== webSeq) return;
+      WEBS.res = res; WEBS.sort = null; WEBS.page = 0; drawWeb();
+    }).catch(fail);
+  }
+  function webMini(el, rows) {
+    if (!rows || !rows.length) { el.innerHTML = '<div class="muted small">Veri yok</div>'; return; }
+    el.innerHTML = '<table class="stat"><thead><tr><th class="t"></th><th>Sessions</th><th>Pay</th><th>CVR</th><th>Revenue</th><th>Gelir payı</th></tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr><td class="t">' + esc(r[0]) + '</td><td>' + fmt(r[1], 'int') + '</td><td>' + fmt(r[2], 'pct') + '</td><td>' + fmt(r[3], 'pct') + '</td><td>' + fmt(r[4], 'usd') + '</td><td>' + fmt(r[5], 'pct') + '</td></tr>'; }).join('') + '</tbody></table>';
+  }
+  function drawWeb() {
+    var res = WEBS.res;
+    $('webWarn').textContent = res && res.warnings ? res.warnings.join(' · ') : '';
+    kpis($('webKpis'), res && res.kpi ? { columns: res.kpi.columns, totals: res.kpi.totals, cmp: res.cmp && res.cmp.kpi } : null, kpiKeys('web'), 'web');
+    renderTable($('webTable'), res, WEBS, {});
+    webMini($('webCh'), res && res.byCh); webMini($('webDev'), res && res.byDev);
+    var f = (res && res.funnel) || [], top = f.length ? f[0][1] : 0;
+    $('webFunnel').innerHTML = f.map(function (s, i) {
+      var w = top ? Math.max(2, s[1] / top * 100) : 0;
+      return '<div class="fn-row"><div class="fn-top"><span>' + esc(s[0]) + '</span><b>' + fmt(s[1], 'int') + '</b></div><div class="fn-bar" style="width:' + w + '%"></div>' +
+        (i ? '<div class="fn-rate">önceki adımdan ' + fmt(f[i - 1][1] ? s[1] / f[i - 1][1] : null, 'pct') + ' · toplamın ' + fmt(top ? s[1] / top : null, 'pct') + '</div>' : '') + '</div>';
+    }).join('');
+    if (webChart) { webChart.destroy(); webChart = null; }
+    if (typeof Chart === 'undefined' || !res || !res.daily || !res.daily.length) return;
+    var d = res.daily, c = function (i) { return cssVar(SERIES[i]) || '#06AEEF'; };
+    webChart = new Chart($('webChart'), {
+      type: 'line',
+      data: { labels: d.map(function (r) { return r[0]; }), datasets: [
+        { label: 'Sessions', data: d.map(function (r) { return r[1]; }), borderColor: c(0), backgroundColor: c(0), yAxisID: 'y', tension: .25, pointRadius: 0 },
+        { label: 'Revenue', data: d.map(function (r) { return Math.round(r[3]); }), borderColor: c(2), backgroundColor: c(2), yAxisID: 'y1', tension: .25, pointRadius: 0 },
+        { label: 'Reklam harcaması', data: d.map(function (r) { return Math.round(r[4]); }), borderColor: c(3), backgroundColor: c(3), yAxisID: 'y1', tension: .25, pointRadius: 0, borderDash: [4, 3] }
+      ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ': ' + (ctx.dataset.yAxisID === 'y1' ? fmt(ctx.raw, 'usd') : fmt(ctx.raw, 'int')); } } } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: 'Sessions' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Tutar' } } } }
+    });
+  }
+
+  /* ================= APP (Adjust) ================= */
+  var APPS = { dims: ['partner'], grain: 'none', res: null, sort: null, page: 0, sel: {}, stale: true, drill: [] };
+  var APP_DRILL = ['partner', 'campaign', 'adgroup', 'creative'], APP_DL = { partner: 'Network', campaign: 'Kampanya', adgroup: 'Reklam grubu', creative: 'Kreatif' };
+  function appDims() { if (!APPS.drill.length) return APPS.dims; var i = APP_DRILL.indexOf(APPS.drill[APPS.drill.length - 1].d); return [APP_DRILL[Math.min(i + 1, APP_DRILL.length - 1)]]; }
+  function appFilt() { var f = {}; APPS.drill.forEach(function (x) { f[x.d] = x.v; }); return f; }
+  function appTblOpt() {
+    var d = appDims(), o = {};
+    if (d.length === 1 && APP_DRILL.indexOf(d[0]) >= 0 && APP_DRILL.indexOf(d[0]) < APP_DRILL.length - 1) { o.drill = {}; o.drill[d[0]] = 1; o.onDrill = drillApp; }
+    return o;
+  }
+  function drillApp(row, key) {
+    var i = -1; APPS.res.columns.forEach(function (c, j) { if (c.k === key) i = j; });
+    if (i < 0) return;
+    APPS.drill.push({ d: key, v: String(row[i]) }); APPS.page = 0; loadApp();
+  }
+  function appCrumb() {
+    var cb = $('appCrumb');
+    if (!cb) { cb = document.createElement('div'); cb.id = 'appCrumb'; cb.className = 'appcrumb'; $('appTable').parentNode.insertBefore(cb, $('appTable')); }
+    var d = appDims(), drillable = d.length === 1 && APP_DRILL.indexOf(d[0]) >= 0;
+    if (!drillable && !APPS.drill.length) { cb.innerHTML = ''; return; }
+    cb.innerHTML = '<a href="#" data-cb="0">Tümü</a>' + APPS.drill.map(function (x, i) { return ' › <a href="#" data-cb="' + (i + 1) + '">' + esc(APP_DL[x.d] + ': ' + x.v) + '</a>'; }).join('') +
+      (d.length === 1 && APP_DL[d[0]] ? ' › <b>' + APP_DL[d[0]] + '</b>' : '') + (APP_DRILL.indexOf(d[0]) < APP_DRILL.length - 1 ? ' <span class="muted small">(alt kırılım için satırdaki ada tıkla)</span>' : '');
+    cb.onclick = function (e) { var a = e.target.closest('[data-cb]'); if (!a) return; e.preventDefault(); APPS.drill = APPS.drill.slice(0, +a.getAttribute('data-cb')); APPS.page = 0; loadApp(); };
+  }
+  var APP_DIM_OPTS = [['', 'Toplam'], ['os', 'OS'], ['partner', 'Network'], ['campaign', 'Kampanya'], ['os,partner', 'OS × Network'], ['partner,campaign', 'Network × Kampanya']];
+  var appChart = null, appSeq = 0;
+  function initApp() {
+    seg($('appDims'), APP_DIM_OPTS, APPS.dims.join(','), function (v) { APPS.dims = v ? v.split(',') : []; APPS.drill = []; loadApp(); });
+    seg($('appGrain'), GRAINS, APPS.grain, function (v) { APPS.grain = v; loadApp(); });
+    $('appCsv').onclick = function () { if (APPS.res) downloadCsv(exportView(APPS.res, APPS, {}), 'app'); };
+    $('appExport').onclick = function () { if (APPS.res) exportSheet(exportView(APPS.res, APPS, {}), 'App · Adjust'); };
+  }
+  function loadApp() {
+    var my = ++appSeq; APPS.stale = false; tsLoad('app');
+    call('apiApp', JSON.stringify({ from: S.from, to: S.to, grain: APPS.grain, dims: appDims(), f: appFilt(), cmp: cmpParam() }), 'App verisi yükleniyor…').then(function (res) {
+      if (my !== appSeq) return;
+      APPS.res = res; APPS.sort = null; APPS.page = 0; drawApp();
+    }).catch(fail);
+  }
+  function appMini(el, rows, hasRet) {
+    if (!rows || !rows.length) { el.innerHTML = '<div class="muted small">Veri yok</div>'; return; }
+    el.innerHTML = '<table class="stat"><thead><tr><th class="t"></th><th>Installs</th><th>Pay</th><th>Purchase</th><th>Revenue</th>' + (hasRet ? '<th>Ret. D7</th>' : '') + '</tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td class="t">' + esc(r[0] || '—') + '</td><td>' + fmt(r[1], 'int') + '</td><td>' + fmt(r[2], 'pct') + '</td><td>' + fmt(r[3], 'num') + '</td><td>' + fmt(r[4], 'usd') + '</td>' + (hasRet ? '<td>' + fmt(r[5], 'pct') + '</td>' : '') + '</tr>';
+      }).join('') + '</tbody></table>';
+  }
+  function drawApp() {
+    var res = APPS.res;
+    $('appWarn').textContent = res && res.warnings ? res.warnings.join(' · ') : '';
+    kpis($('appKpis'), res, kpiKeys('app'), 'app');
+    renderTable($('appTable'), res, APPS, appTblOpt()); appCrumb();
+    var fnc = $('appFnCard'), f = res && res.funnel;
+    if (fnc) { fnc.classList.toggle('hidden', !f); if (f) $('appFunnel').innerHTML = f.map(function (s, i) {
+      var top = f[0][1], w = top ? Math.max(2, Math.sqrt(s[1] / top) * 100) : 0;
+      return '<div class="fn-row"><div class="fn-top"><span>' + esc(s[0]) + '</span><b>' + fmt(s[1], 'int') + '</b></div><div class="fn-bar" style="width:' + w + '%"></div>' +
+        (i ? '<div class="fn-rate">önceki adımdan ' + fmt(f[i - 1][1] ? s[1] / f[i - 1][1] : null, 'pct') + '</div>' : '') + '</div>';
+    }).join(''); }
+    if (res && res.costNote) $('appWarn').textContent = [$('appWarn').textContent, res.costNote].filter(String).join(' · ');
+    appMini($('appOs'), res && res.byOs, res && res.hasRet);
+    appMini($('appNet'), res && res.byNet, res && res.hasRet);
+    if (appChart) { appChart.destroy(); appChart = null; }
+    if (typeof Chart === 'undefined' || !res || !res.daily || !res.daily.length) return;
+    var d = res.daily, c = function (i) { return cssVar(SERIES[i]) || '#06AEEF'; };
+    appChart = new Chart($('appChart'), {
+      type: 'line',
+      data: { labels: d.map(function (r) { return r[0]; }), datasets: [
+        { label: 'Installs', data: d.map(function (r) { return r[1]; }), borderColor: c(0), backgroundColor: c(0), yAxisID: 'y', tension: .25, pointRadius: 0 },
+        { label: 'Organik install', data: d.map(function (r) { return r[5]; }), borderColor: c(3), backgroundColor: c(3), yAxisID: 'y', tension: .25, pointRadius: 0, borderDash: [4, 3] },
+        { label: 'Purchase', data: d.map(function (r) { return r[2]; }), borderColor: c(1), backgroundColor: c(1), yAxisID: 'y', tension: .25, pointRadius: 0 },
+        { label: 'Revenue', data: d.map(function (r) { return Math.round(r[3]); }), borderColor: c(2), backgroundColor: c(2), yAxisID: 'y1', tension: .25, pointRadius: 0 }
+      ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ': ' + (ctx.dataset.yAxisID === 'y1' ? fmt(ctx.raw, 'usd') : fmt(ctx.raw, 'int')); } } } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: 'Adet' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Revenue' } } } }
+    });
+  }
   function showTab(t) {
     S.tab = t;
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === t); });
-    ['ads', 'status'].forEach(function (x) { $('p-' + x).classList.toggle('hidden', x !== t); });
+    ['ads', 'web', 'app', 'creative', 'cpas', 'targets', 'status'].forEach(function (x) { $('p-' + x).classList.toggle('hidden', x !== t); });
+    if (t === 'targets') openTargets();
+    if (t === 'creative' && (!CRS.res || CRS.stale)) loadCreative();
+    if (t === 'cpas' && (!CPS.res || CPS.stale)) loadCpas();
+    if (t === 'app' && (!APPS.res || APPS.stale)) loadApp();
+    if (t === 'web' && (!WEBS.res || WEBS.stale)) loadWeb();
     $('filters').classList.toggle('hidden', t === 'status');
     if (t === 'status' && !statusLoaded) { statusLoaded = true; loadStatus(); }
   }
@@ -1099,7 +2218,13 @@
     clearTimeout(applyT);
     S.from = $('fFrom').value; S.to = $('fTo').value;
     if (S.from > S.to) return toast('Başlangıç tarihi bitişten sonra olamaz');
+    cmpUi();
     prefetchQ = [];
+    APPS.stale = true; WEBS.stale = true; CRS.stale = true; CPS.stale = true;
+    if (S.tab === 'creative') loadCreative();
+    if (S.tab === 'cpas') loadCpas();
+    if (S.tab === 'app') loadApp();
+    if (S.tab === 'web') loadWeb();
     loadAds();
   }
 
@@ -1120,14 +2245,14 @@
     $('fFrom').min = $('fTo').min = B.startDate;
     $('fFrom').max = $('fTo').max = B.dataEnd;
     var hh = ('0' + (B.refreshHour || 0)).slice(-2) + ':00';
-    $('dataNote').textContent = 'ⓘ Bugünün verisini içermez · her gün ' + hh + ' sonrası güncellenir';
-    $('dataNote').title = 'Veriler bugünü içermez; her gün ' + hh + ' sonrası dün dahil güncellenir.';
+    $('dataNote').textContent = 'ⓘ Bugünün verisini içermez · her gece ' + hh + ' sonrası güncellenir';
+    $('dataNote').title = 'Veriler bugünü içermez; her gece ' + hh + ' sonrası dün dahil güncellenir.';
     if (B.lastUpdate) $('dataNote').title += ' Son güncelleme: ' + B.lastUpdate.slice(0, 16) + '.';
     $('fFrom').onchange = function () { S.from = this.value; scheduleApply(300); };
     $('fTo').onchange = function () { S.to = this.value; scheduleApply(300); };
     $('fPreset').onchange = function () { if (this.value) { preset(this.value); this.value = ''; applyFilters(); } };
-    $('btnApply').onclick = applyFilters;
-    initAds(); initTrend(); initStatus(); initFeedback();
+    $('btnApply').onclick = applyFilters; initCmp(); loadTargets();
+    initAds(); initApp(); initWeb(); initCreative(); initCpas(); initTrend(); initStatus(); initFeedback();
     $('tabs').onclick = function (e) { var t = e.target.closest('button'); if (t) showTab(t.getAttribute('data-tab')); };
     showTab('ads');
     skeleton();

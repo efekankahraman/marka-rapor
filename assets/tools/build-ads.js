@@ -27,4 +27,16 @@ fs.writeFileSync(path.join(pj, 'Brand.js'), brand);
 fs.writeFileSync(path.join(pj, 'Bridge.js'), rd('ga4-script/GA4Bridge.src.js').replace('__CONFIG_URL__', cfg));
 fs.writeFileSync(path.join(pj, 'Shared.js'), shared);
 fs.writeFileSync(path.join(pj, 'Ga4.js'), rd('apps-script/Ga4.js'));
-console.log('ok → dist/GoogleAds_Script_MCC1.js, dist/GoogleAds_Script_MCC2.js, ga4-script/project/');
+// Microsoft Ads script'i (veriyi misafir web uygulamasına POST eder)
+const B = {};
+new Function('o', brand + '\no.BRAND = BRAND;')(B);
+const bingAccts = (B.BRAND.ACCOUNTS || []).filter(a => a[0] === 'Microsoft Ads').map(a => String(a[3]));
+if (bingAccts.length) {
+  if (!B.BRAND.GUEST_DEPLOYMENT_ID || !B.BRAND.BING_PUSH_KEY) { console.error('Microsoft Ads: Brand.js > GUEST_DEPLOYMENT_ID / BING_PUSH_KEY boş (önce deploy.sh --init)'); process.exit(1); }
+  fs.writeFileSync(path.join(dist, 'MicrosoftAds_Script.js'), rd('ads-script/MicrosoftAds.src.js')
+    .replace('__PUSH_URL__', 'https://script.google.com/macros/s/' + B.BRAND.GUEST_DEPLOYMENT_ID + '/exec')
+    .replace('__PUSH_KEY__', B.BRAND.BING_PUSH_KEY)
+    .replace('__ACCOUNTS__', JSON.stringify(bingAccts))
+    .replace('__START_DATE__', B.BRAND.START_DATE || '2025-01-01'));
+}
+console.log('ok → dist/GoogleAds_Script_MCC1.js, dist/GoogleAds_Script_MCC2.js, ga4-script/project/' + (bingAccts.length ? ', dist/MicrosoftAds_Script.js' : ''));

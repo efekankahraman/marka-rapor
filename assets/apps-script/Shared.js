@@ -16,12 +16,19 @@ var STORE_DATASETS = {
   gads_ad:       { shard: 'month', title: 'Google Ads · Ad · Günlük' },
   gads_campaign_2: { shard: 'year',  title: 'Google Ads (MCC 2) · Kampanya · Günlük' },
   gads_ad_2:       { shard: 'month', title: 'Google Ads (MCC 2) · Ad · Günlük' },
+  ext_ad:        { shard: 'month', title: 'Diğer mecralar · Kreatif / reklam · Günlük' },
+  gads_asset:    { shard: 'month', title: 'Google Ads · Varlık (görsel / video / metin) · Günlük' },
+  gads_asset_2:  { shard: 'month', title: 'Google Ads (MCC 2) · Varlık · Günlük' },
   meta_campaign: { shard: 'year',  title: 'Meta · Kampanya · Günlük' },
   meta_ad:       { shard: 'month', title: 'Meta · Ad · Günlük' },
   adjust:        { shard: 'month', title: 'Adjust · Kampanya · Günlük' },
   ga4:           { shard: 'year',  title: 'GA4 · Günlük' },
   adjust_ag:     { shard: 'month', title: 'Adjust · Ad group · Günlük' },
-  ga4_ag:        { shard: 'month', title: 'GA4 · Ad group · Günlük' }
+  ga4_ag:        { shard: 'month', title: 'GA4 · Ad group · Günlük' },
+  ext_campaign:  { shard: 'year',  title: 'Diğer platformlar (TikTok, Yandex, RTB House, Manuel) · Kampanya · Günlük' },
+  ext_push:      { shard: 'year',  title: 'Microsoft Ads · Kampanya · Günlük' },
+  adjust_app:    { shard: 'month', title: 'Adjust · App (OS · network · kampanya) · Günlük' },
+  ga4_web:       { shard: 'month', title: 'GA4 · Web (kanal · kaynak · cihaz) · Günlük' }
 };
 
 var SHEET_NAMES = {

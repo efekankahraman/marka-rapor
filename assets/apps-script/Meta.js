@@ -46,7 +46,7 @@ function meta_sync_(ss, it, t0) {
       level: 'ad',
       time_increment: '1',
       time_range: JSON.stringify({ since: it.from, until: it.to }),
-      fields: META_FIELDS.join(','),
+      fields: meta_fields_(it.account),
       use_unified_attribution_setting: 'true',
       access_token: token
     };
@@ -82,8 +82,10 @@ function meta_sync_(ss, it, t0) {
         String(d.campaign_id || ''), d.campaign_name || '', d.objective || '',
         String(d.adset_id || ''), d.adset_name || '', String(d.ad_id || ''), d.ad_name || '',
         +d.impressions || 0, +d.reach || 0, +d.clicks || 0, +d.inline_link_clicks || 0, +d.spend || 0,
-        meta_pick_(d.actions, META_ACTIONS.purchases), meta_pick_(d.action_values, META_ACTIONS.purchases),
-        meta_pick_(d.actions, META_ACTIONS.add_to_cart), meta_pick_(d.actions, META_ACTIONS.initiate_checkout),
+        meta_pick_(d.actions, META_ACTIONS.purchases) || meta_pick_(d.catalog_segment_actions, META_ACTIONS.purchases),
+        meta_pick_(d.action_values, META_ACTIONS.purchases) || meta_pick_(d.catalog_segment_value, META_ACTIONS.purchases),
+        meta_pick_(d.actions, META_ACTIONS.add_to_cart) || meta_pick_(d.catalog_segment_actions, META_ACTIONS.add_to_cart),
+        meta_pick_(d.actions, META_ACTIONS.initiate_checkout) || meta_pick_(d.catalog_segment_actions, META_ACTIONS.initiate_checkout),
         meta_pick_(d.actions, META_ACTIONS.installs), meta_pick_(d.actions, META_ACTIONS.landing_page_views)
       ]);
     });
@@ -154,7 +156,7 @@ function meta_prestart_(ss, items) {
   var reqs = items.map(function (it) {
     return { url: base + 'act_' + it.account + '/insights', method: 'post', muteHttpExceptions: true, payload: {
       level: 'ad', time_increment: '1', time_range: JSON.stringify({ since: it.from, until: it.to }),
-      fields: META_FIELDS.join(','), use_unified_attribution_setting: 'true', access_token: token } };
+      fields: meta_fields_(it.account), use_unified_attribution_setting: 'true', access_token: token } };
   });
   UrlFetchApp.fetchAll(reqs).forEach(function (res, i) {
     var body = null;
@@ -164,4 +166,9 @@ function meta_prestart_(ss, items) {
       queueSheet_(ss).getRange(items[i].row, 7).setValue(items[i].message);
     }
   });
+}
+
+/** CPAS (Collaborative Ads) hesaplarında satışlar catalog_segment_* alanlarında gelir. */
+function meta_fields_(acct) {
+  return (cpas_is_(acct) ? META_FIELDS.concat(['catalog_segment_actions', 'catalog_segment_value']) : META_FIELDS).join(',');
 }

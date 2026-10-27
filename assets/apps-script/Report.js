@@ -29,10 +29,23 @@ if (!showCountry_()) {
 
 function r_sum_(a, b) { return (a || 0) + (b || 0); }
 
+/** Kullanıcının seçtiği boyutlar (Görünüm > Boyutlar). Seviyede izin verilenler dışında kalanlar atılır; boşsa seviyenin varsayılanı. */
+var R_DIM_ALL = ['platform', 'country', 'tip', 'account_name', 'account_id', 'campaign_name', 'campaign_id', 'adgroup_name', 'adgroup_id', 'ad_name', 'ad_id', 'ad_type'];
+function r_dims_(p, level) {
+  var base = R_LEVELS[level] || R_LEVELS.campaign;
+  if (!p || !p.dims || !p.dims.length) return base;
+  var max = level === 'ad' ? 12 : level === 'adgroup' ? 9 : 7;
+  var ok = R_DIM_ALL.slice(0, max).filter(function (f) { return showCountry_() || f !== 'country'; });
+  var out = [];
+  p.dims.forEach(function (f) { if (ok.indexOf(f) >= 0 && out.indexOf(f) < 0) out.push(f); });
+  return out.length ? out : base;
+}
+
 var R_METRICS = [
-  { k: 'spend_usd', l: 'Spend ($)', u: 'usd', g: 'plat' },
+  { k: 'spend_usd', l: 'Spend', u: 'usd', g: 'plat' },
   { k: 'spend', l: 'Spend (orig.)', u: 'money', g: 'plat', orig: 1 },
   { k: 'roas', l: 'ROAS', u: 'x', g: 'plat', web: 1, d: function (m) { return q_div_(r_sum_(m.ga_revenue_usd, m.adj_revenue_usd), m.spend_usd); } },
+  { k: 'margin', l: 'Marjin', u: 'pct', g: 'plat', web: 1, d: function (m) { return q_div_(m.spend_usd, r_sum_(m.ga_revenue_usd, m.adj_revenue_usd)); } },
   { k: 'cohort_roas', l: 'Cohort ROAS', u: 'x', g: 'plat', web: 1, d: function (m) { return q_div_(r_sum_(m.ga_revenue_usd, m.adj_c_revenue_usd), m.spend_usd); } },
   { k: 'cpi', l: 'CPI', u: 'usd', g: 'plat', web: 1, d: function (m) { return q_div_(m.spend_usd, m.adj_installs); } },
   { k: 'cps', l: 'CPS', u: 'usd', g: 'plat', web: 1, d: function (m) { return q_div_(m.spend_usd, r_sum_(m.ga_sessions, m.adj_sessions)); } },
@@ -40,7 +53,7 @@ var R_METRICS = [
   { k: 'impressions', l: 'Impressions', u: 'int', g: 'plat' },
   { k: 'cpc', l: 'CPC', u: 'usd', g: 'plat', d: function (m) { return q_div_(m.spend_usd, m.clicks); } },
   { k: 'ctr', l: 'CTR', u: 'pct', g: 'plat', d: function (m) { return q_div_(m.clicks, m.impressions); } },
-  { k: 'installs', l: 'Installs (Platform)', u: 'int', g: 'plat' },
+  { k: 'installs', l: 'Installs (Mecra)', u: 'int', g: 'plat' },
   { k: 'cost_per_install', l: 'Cost / Install', u: 'usd', g: 'plat', d: function (m) { return q_div_(m.spend_usd, m.installs); } },
   { k: 'ga_sessions', l: 'GA4 Sessions', u: 'int', g: 'ga4', web: 1 },
   { k: 'ga_purchases', l: 'GA4 Purchase', u: 'int', g: 'ga4', web: 1 },
@@ -95,7 +108,7 @@ function q_report_(ss, p) {
   if (useAd && q_daysBetween_(p.from, p.to) > maxDays) {
     throw new Error('Ad / ad group seviyesinde en fazla ' + maxDays + ' günlük aralık seçilebilir (şu an ' + q_daysBetween_(p.from, p.to) + ' gün). Tarih aralığını daraltın.');
   }
-  var groupFields = R_LEVELS[level];
+  var groupFields = r_dims_(p, level);
   // GA4/Adjust: kampanya seviyesine kadar kampanya adıyla; ad group seviyesinde kampanya + ad group adıyla eşleşir (ad seviyesinde yok)
   var isAg = level === 'adgroup';
   var withWeb = !useAd || isAg;
@@ -106,7 +119,7 @@ function q_report_(ss, p) {
   sh_accounts_(ss).forEach(function (a) { acc[a.platform + '|' + a.id] = a; });
   var perUsd = fx_loader_(ss);
   var f = p.filters || {};
-  var plat = f.platforms && f.platforms.length ? f.platforms : ['Google Ads', 'Meta'];
+  var plat = f.platforms && f.platforms.length ? f.platforms : ['Google Ads', 'Meta'].concat(EXT_PLATFORMS);
   var cset = f.countries && f.countries.length ? q_set_(f.countries) : null;
   var aset = f.accounts && f.accounts.length ? q_set_(f.accounts) : null;
   var tips = f.tips && f.tips.length ? f.tips : null;
@@ -170,7 +183,7 @@ function q_report_(ss, p) {
     files += q_readShards_(ss, useAd ? 'gads_ad_2' : 'gads_campaign_2', p.from, p.to, gReader);
   }
   if (plat.indexOf('Meta') >= 0) {
-    files += q_readShards_(ss, useAd ? 'meta_ad' : 'meta_campaign', p.from, p.to, function (r, ix) {
+    files += q_readShards_(ss, useAd ? 'meta_ad' : 'meta_campaign', p.from, p.to, function (r, ix) { if (cpas_is_(r[1])) return;
       accept({
         date: r[0], platform: 'Meta', account_id: r[1], currency: r[ix.currency],
         campaign_id: String(r[ix.campaign_id]), campaign_name: String(r[ix.campaign_name]),
@@ -180,6 +193,17 @@ function q_report_(ss, p) {
         clicks: +r[ix.link_clicks] || 0, // Meta: link clicks
         installs: +r[ix.installs] || 0
       });
+    });
+  }
+  // diğer platformlar: sadece kampanya seviyesine kadar veri var (ad group / ad yok)
+  if (!useAd && plat.some(function (x) { return EXT_PLATFORMS.indexOf(x) >= 0; })) {
+    files += ext_readAll_(ss, p.from, p.to, function (r, ix) {
+      var pf = String(r[ix.platform]);
+      if (plat.indexOf(pf) < 0) return;
+      accept({ date: r[0], platform: pf, account_id: r[1], currency: r[ix.currency],
+        campaign_id: String(r[ix.campaign_id]), campaign_name: String(r[ix.campaign_name]),
+        adgroup_id: '', adgroup_name: '', ad_id: '', ad_name: '', ad_type: '',
+        spend: +r[ix.spend] || 0, impressions: +r[ix.impressions] || 0, clicks: +r[ix.clicks] || 0, installs: +r[ix.installs] || 0 });
     });
   }
 

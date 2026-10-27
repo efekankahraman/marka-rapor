@@ -21,9 +21,19 @@ function runSync() {
       try { fx_sync_(ss); pp.setProperty('FX_INIT', '1'); } catch (e) { sh_log_(ss, 'fx', 'ERROR', e.message || e); }
       t0 = Date.now();
     }
+    // rapor para birimi değiştiyse küp yeniden kurulur
+    if (pp.getProperty('CUBE_CUR') !== REPORT_CUR + '|sm1') { try { cube_build_(ss); pp.setProperty('CUBE_CUR', REPORT_CUR + '|sm1'); } catch (e) { sh_log_(ss, 'cube', 'ERROR', e.message || e); } t0 = Date.now(); }
     maybeDaily_(ss);
+    // App sekmesi verisi: ilk kez geçmişi kuyruğa al
+    if (pp.getProperty('META_CPAS1') !== '1' && (BRAND.CPAS_ACCOUNTS || []).length) { try { enqueueBackfill_(ss, ['meta']); pp.setProperty('META_CPAS1', '1'); } catch (e) { sh_log_(ss, 'meta', 'ERROR', e.message || e); } }
+    if (pp.getProperty('APP_INIT') !== '3' && sh_settings_(ss).ADJUST_APP_TOKENS) { try { enqueueBackfill_(ss, ['adjust_app']); pp.setProperty('APP_INIT', '3'); } catch (e) { sh_log_(ss, 'adjust_app', 'ERROR', e.message || e); } }
     try { guests_sync_(ss); } catch (e) { sh_log_(ss, 'guests', 'ERROR', e.message || e); }
     try { probe_status_(ss); } catch (e) {}
+    try { shareRoot_(ss); } catch (e) { sh_log_(ss, 'share', 'ERROR', e.message || e); }
+    try { manual_sync_(ss); } catch (e) { sh_log_(ss, 'manuel', 'ERROR', e.message || e); }
+    try { creative_syncDaily_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', e.message || e); }
+    if (pp.getProperty('CRITEO_DIAG1') !== '1' && pp.getProperty('CRITEO_CREDENTIALS')) { pp.setProperty('CRITEO_DIAG1', '1'); try { criteo_probe_(ss); } catch (e) { sh_log_(ss, 'criteo', 'ERROR', 'teşhis: ' + (e.message || e)); } }
+    try { extad_syncAll_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', 'diğer mecralar: ' + (e.message || e)); }
     // Önce kuyruk (küp kurulumu 2-7 dk sürebildiği için önce kurulursa kuyruğa zaman kalmıyordu)
     var r = processQueue_(ss, t0);
     // sonra rapor küpü: veri dosyaları güncellendiyse yeniden kur (eşleştirme burada bir kez yapılır)
@@ -42,7 +52,7 @@ function maybeDaily_(ss) {
   var s = sh_settings_(ss);
   if (props.getProperty('LAST_DAILY') === today || hour < +(s.DAILY_REFRESH_HOUR || 3)) return;
   try { fx_sync_(ss); } catch (e) { sh_log_(ss, 'fx', 'ERROR', e.message || e); }
-  enqueueRecent_(ss, ['meta', 'adjust', 'adjust_ag', 'ga4', 'ga4_ag']);
+  enqueueRecent_(ss, ['meta', 'adjust', 'adjust_ag', 'adjust_app', 'ga4', 'ga4_ag'].concat(Object.keys(EXT_SOURCES)));
   props.setProperty('LAST_DAILY', today);
   props.setProperty('LAST_DAILY_AT', sh_now_());
 }
@@ -98,9 +108,10 @@ function compactQueue_(ss) {
 
 function sourceTargets_(ss, source) {
   if (source === 'meta') return sh_accounts_(ss, 'Meta').filter(function (a) { return a.active; }).map(function (a) { return a.id; });
+  if (EXT_SOURCES[source]) return sh_accounts_(ss, EXT_SOURCES[source]).filter(function (a) { return a.active; }).map(function (a) { return a.id; });
   if (source === 'ga4' && ga4External_(ss)) return []; // GA4 köprü script'i (başka hesap) çekiyor
   if (source === 'ga4') return sh_accounts_(ss, 'GA4').filter(function (a) { return a.active; }).map(function (a) { return a.id; });
-  if (source === 'adjust' || source === 'adjust_ag') return sh_settings_(ss).ADJUST_APP_TOKENS ? ['ALL'] : [];
+  if (source === 'adjust' || source === 'adjust_ag' || source === 'adjust_app') return sh_settings_(ss).ADJUST_APP_TOKENS ? ['ALL'] : [];
   if (source === 'ga4_ag') return !ga4External_(ss) && String(sh_settings_(ss).GA4_GLOBAL_PROPERTY || '').trim() ? ['ALL'] : [];
   return [];
 }
@@ -112,7 +123,8 @@ function ga4External_(ss) {
 function sourceReady_(source) {
   var p = PropertiesService.getScriptProperties();
   if (source === 'meta') return !!p.getProperty('META_TOKEN');
-  if (source === 'adjust' || source === 'adjust_ag') return !!p.getProperty('ADJUST_TOKEN');
+  if (source === 'adjust' || source === 'adjust_ag' || source === 'adjust_app') return !!p.getProperty('ADJUST_TOKEN');
+  if (EXT_TOKEN_PROP[source]) return !!p.getProperty(EXT_TOKEN_PROP[source]);
   return true;
 }
 
@@ -134,6 +146,8 @@ function enqueueRecent_(ss, sources) {
   var s = sh_settings_(ss);
   var today = sh_yesterday_(); // veri bugünü içermez
   var lb = { meta: +s.META_LOOKBACK_DAYS || 7, adjust: +s.ADJUST_LOOKBACK_DAYS || 7, adjust_ag: +s.ADJUST_LOOKBACK_DAYS || 7, ga4: +s.GA4_LOOKBACK_DAYS || 3, ga4_ag: +s.GA4_LOOKBACK_DAYS || 3 };
+  Object.keys(EXT_SOURCES).forEach(function (k) { lb[k] = +s.EXT_LOOKBACK_DAYS || 7; });
+  lb.adjust_app = +s.ADJUST_LOOKBACK_DAYS || 7;
   var items = [];
   sources.forEach(function (src) {
     var from = sh_addDays_(today, -lb[src]);
@@ -217,8 +231,10 @@ function runItem_(ss, it, t0) {
   if (it.source === 'meta') return meta_sync_(ss, it, t0);
   if (it.source === 'adjust') return adjust_sync_(ss, it.from, it.to);
   if (it.source === 'adjust_ag') return adjust_agSync_(ss, it.from, it.to);
+  if (it.source === 'adjust_app') return adjust_appSync_(ss, it.from, it.to);
   if (it.source === 'ga4') return ga4_sync_(ss, it.account, it.from, it.to);
   if (it.source === 'ga4_ag') return ga4_agSync_(ss, it.from, it.to);
+  if (ext_isSource_(it.source)) return ext_sync_(ss, it);
   throw new Error('Bilinmeyen kaynak ' + it.source);
 }
 
@@ -300,7 +316,18 @@ function fx_sync_(ss) {
 }
 
 /** {date: {CUR: perUsd}} + ileri doldurma fonksiyonu */
+/** {date, cur} → 1 rapor para birimi (REPORT_CUR) karşılığı cur birimi. USD raporda eski davranış. */
 function fx_loader_(ss) {
+  var raw = fx_loaderUsd_(ss);
+  if (REPORT_CUR === 'USD') return raw;
+  return function (date, cur) {
+    if (!cur || cur === REPORT_CUR) return 1;
+    var a = raw(date, cur), b = raw(date, REPORT_CUR);
+    return a && b ? a / b : null;
+  };
+}
+
+function fx_loaderUsd_(ss) {
   var ex = st_readSheet_(sh_sheet_(ss, SHEET_NAMES.fx));
   var map = {};
   ex.rows.forEach(function (r) {

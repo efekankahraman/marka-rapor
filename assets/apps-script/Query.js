@@ -15,20 +15,20 @@ var ADS_LEVELS = {
 };
 
 var FIELD_LABELS = {
-  period: 'Dönem', platform: 'Platform', country: 'Ülke', tip: 'Tip', account_name: 'Hesap', account_id: 'Hesap ID',
+  period: 'Dönem', platform: 'Mecra', country: 'Ülke', tip: 'Tip', account_name: 'Hesap', account_id: 'Hesap ID',
   currency: 'Para birimi', campaign_name: 'Kampanya', campaign_id: 'Kampanya ID', adgroup_name: 'Ad group / Ad set',
   adgroup_id: 'Ad group ID', ad_name: 'Ad', ad_id: 'Ad ID', ad_type: 'Ad tipi', channel: 'Kanal',
   app: 'App', os: 'OS', partner: 'Network', campaign: 'Kampanya', adgroup: 'Adgroup', property: 'GA4 property'
 };
 
 var ADS_METRICS = [
-  { k: 'spend_usd', l: 'Spend ($)', u: 'usd' },
+  { k: 'spend_usd', l: 'Spend', u: 'usd' },
   { k: 'spend', l: 'Spend (orig.)', u: 'money', orig: true },
   { k: 'impressions', l: 'Impressions', u: 'int' },
   { k: 'clicks', l: 'Clicks', u: 'int' },
   { k: 'all_clicks', l: 'All Clicks', u: 'int' },
   { k: 'conversions', l: 'Conversions', u: 'num' },
-  { k: 'conv_value_usd', l: 'Conv. Value ($)', u: 'usd' },
+  { k: 'conv_value_usd', l: 'Conv. Value', u: 'usd' },
   { k: 'conv_value', l: 'Conv. Value (orig.)', u: 'money', orig: true },
   { k: 'all_conversions', l: 'All Conversions (Google)', u: 'num' },
   { k: 'add_to_cart', l: 'Add to Cart (Meta)', u: 'num' },
@@ -36,10 +36,11 @@ var ADS_METRICS = [
   { k: 'installs', l: 'App Installs (Meta)', u: 'num' },
   { k: 'landing_page_views', l: 'Landing Page Views (Meta)', u: 'num' },
   { k: 'ctr', l: 'CTR', u: 'pct', d: function (m) { return q_div_(m.clicks, m.impressions); } },
-  { k: 'cpc', l: 'CPC ($)', u: 'usd', d: function (m) { return q_div_(m.spend_usd, m.clicks); } },
-  { k: 'cpm', l: 'CPM ($)', u: 'usd', d: function (m) { return q_div_(m.spend_usd * 1000, m.impressions); } },
-  { k: 'cpa', l: 'CPA ($)', u: 'usd', d: function (m) { return q_div_(m.spend_usd, m.conversions); } },
+  { k: 'cpc', l: 'CPC', u: 'usd', d: function (m) { return q_div_(m.spend_usd, m.clicks); } },
+  { k: 'cpm', l: 'CPM', u: 'usd', d: function (m) { return q_div_(m.spend_usd * 1000, m.impressions); } },
+  { k: 'cpa', l: 'CPA', u: 'usd', d: function (m) { return q_div_(m.spend_usd, m.conversions); } },
   { k: 'roas', l: 'ROAS', u: 'x', d: function (m) { return q_div_(m.conv_value_usd, m.spend_usd); } },
+  { k: 'margin', l: 'Marjin', u: 'pct', d: function (m) { return q_div_(m.spend_usd, m.conv_value_usd); } },
   { k: 'cvr', l: 'CVR', u: 'pct', d: function (m) { return q_div_(m.conversions, m.clicks); } }
 ];
 
@@ -186,7 +187,7 @@ function q_ads_(ss, p) {
   sh_accounts_(ss).forEach(function (a) { acc[a.platform + '|' + a.id] = a; });
   var perUsd = fx_loader_(ss);
   var f = p.filters || {};
-  var plat = f.platforms && f.platforms.length ? f.platforms : ['Google Ads', 'Meta'];
+  var plat = f.platforms && f.platforms.length ? f.platforms : ['Google Ads', 'Meta'].concat(EXT_PLATFORMS);
   var cset = f.countries && f.countries.length ? q_set_(f.countries) : null;
   var aset = f.accounts && f.accounts.length ? q_set_(f.accounts) : null;
   var tips = f.tips && f.tips.length ? f.tips : null;
@@ -230,7 +231,7 @@ function q_ads_(ss, p) {
     files += q_readShards_(ss, useAd ? 'gads_ad_2' : 'gads_campaign_2', p.from, p.to, gReader);
   }
   if (plat.indexOf('Meta') >= 0) {
-    files += q_readShards_(ss, useAd ? 'meta_ad' : 'meta_campaign', p.from, p.to, function (r, ix) {
+    files += q_readShards_(ss, useAd ? 'meta_ad' : 'meta_campaign', p.from, p.to, function (r, ix) { if (cpas_is_(r[1])) return;
       accept({
         date: r[0], platform: 'Meta', account_id: r[1], currency: r[ix.currency],
         campaign_id: r[ix.campaign_id], campaign_name: String(r[ix.campaign_name]), channel: r[ix.objective],
@@ -242,6 +243,17 @@ function q_ads_(ss, p) {
         add_to_cart: +r[ix.add_to_cart] || 0, initiate_checkout: +r[ix.initiate_checkout] || 0,
         installs: +r[ix.installs] || 0, landing_page_views: +r[ix.landing_page_views] || 0
       });
+    });
+  }
+  if (!useAd && plat.some(function (x) { return EXT_PLATFORMS.indexOf(x) >= 0; })) {
+    files += ext_readAll_(ss, p.from, p.to, function (r, ix) {
+      var pf = String(r[ix.platform]);
+      if (plat.indexOf(pf) < 0) return;
+      accept({ date: r[0], platform: pf, account_id: r[1], currency: r[ix.currency],
+        campaign_id: r[ix.campaign_id], campaign_name: String(r[ix.campaign_name]), channel: '',
+        adgroup_id: '', adgroup_name: '', ad_id: '', ad_name: '', ad_type: '',
+        spend: +r[ix.spend] || 0, impressions: +r[ix.impressions] || 0, clicks: +r[ix.clicks] || 0, all_clicks: +r[ix.clicks] || 0,
+        conversions: +r[ix.conversions] || 0, conv_value: +r[ix.conv_value] || 0, installs: +r[ix.installs] || 0 });
     });
   }
   var out = q_build_(agg, groupFields, p.grain, metrics, sumKeys, 'spend_usd');
@@ -333,12 +345,13 @@ var WEBAPP_METRICS = [
   { k: 'installs', l: 'Installs (app)', u: 'int' },
   { k: 'add_to_cart', l: 'Add to Cart (web)', u: 'int' },
   { k: 'purchases', l: 'Purchases', u: 'num' },
-  { k: 'revenue_usd', l: 'Revenue ($)', u: 'usd' },
-  { k: 'spend_usd', l: 'Ad Spend ($)', u: 'usd', spend: true },
+  { k: 'revenue_usd', l: 'Revenue', u: 'usd' },
+  { k: 'spend_usd', l: 'Ad Spend', u: 'usd', spend: true },
   { k: 'cvr', l: 'CVR (purchases / sessions)', u: 'pct', d: function (m) { return q_div_(m.purchases, m.sessions); } },
-  { k: 'aov', l: 'AOV ($)', u: 'usd', d: function (m) { return q_div_(m.revenue_usd, m.purchases); } },
+  { k: 'aov', l: 'AOV', u: 'usd', d: function (m) { return q_div_(m.revenue_usd, m.purchases); } },
   { k: 'blended_roas', l: 'Blended ROAS', u: 'x', spend: true, d: function (m) { return q_div_(m.revenue_usd, m.spend_usd); } },
-  { k: 'cost_per_purchase', l: 'Cost per Purchase ($)', u: 'usd', spend: true, d: function (m) { return q_div_(m.spend_usd, m.purchases); } }
+  { k: 'margin', l: 'Marjin', u: 'pct', spend: true, d: function (m) { return q_div_(m.spend_usd, m.revenue_usd); } },
+  { k: 'cost_per_purchase', l: 'Cost per Purchase', u: 'usd', spend: true, d: function (m) { return q_div_(m.spend_usd, m.purchases); } }
 ];
 var WEBAPP_DIMS = ['kanal', 'country'];
 
@@ -400,12 +413,19 @@ function q_webapp_(ss, p) {
     sh_accounts_(ss).forEach(function (a) { acc[a.platform + '|' + a.id] = a; });
     [['gads_campaign', 'Google Ads', 'cost'], ['gads_campaign_2', 'Google Ads', 'cost'], ['meta_campaign', 'Meta', 'spend']].forEach(function (d) {
       q_readShards_(ss, d[0], p.from, p.to, function (r, ix) {
-        var a = acc[d[1] + '|' + r[1]];
+        var a = acc[d[1] + '|' + r[1]]; if (d[1] === 'Meta' && cpas_is_(r[1])) return;
         if (!a || !a.active) return;
         if (cset && !cset[a.code]) return;
         var rate = perUsd(r[0], r[ix.currency]);
         agg.add({ date: r[0], kanal: '', country: a.code, spend_usd: rate ? (+r[ix[d[2]]] || 0) / rate : 0 });
       });
+    });
+    ext_readAll_(ss, p.from, p.to, function (r, ix) {
+      var a = acc[String(r[ix.platform]) + '|' + r[1]];
+      if (!a || !a.active) return;
+      if (cset && !cset[a.code]) return;
+      var rate = perUsd(r[0], r[ix.currency]);
+      agg.add({ date: r[0], kanal: '', country: a.code, spend_usd: rate ? (+r[ix.spend] || 0) / rate : 0 });
     });
   }
 

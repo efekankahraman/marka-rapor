@@ -28,7 +28,8 @@ function setup() {
     buildConfigSheets_(ss, dataF.getId(), expF.getId());
   }
   installTriggers_();
-  enqueueBackfill_(ss, ['meta', 'adjust', 'ga4']);
+  enqueueBackfill_(ss, ['meta', 'adjust', 'ga4'].concat(Object.keys(EXT_SOURCES)));
+  try { manual_sheet_(ss); } catch (e) {}
   enqueueBackfill_(ss, ['adjust_ag', 'ga4_ag'], String(sh_settings_(ss).AG_START_DATE || BRAND.AG_START_DATE || '2026-01-01'));
   props.setProperty('SETTINGS_V', String(DEFAULT_SETTINGS.length));
   sh_log_(ss, 'setup', 'INFO', 'Kurulum tamam.');
@@ -50,7 +51,7 @@ function buildConfigSheets_(ss, dataFolderId, exportFolderId) {
     acc.getRange(2, 7, rows.length, 1).insertCheckboxes();
   }
   acc.setFrozenRows(1);
-  acc.getRange(Math.max(rows.length, 1) + 8, 1).setValue('Hesap eklemek için yeni satır: Platform = Google Ads / Meta / GA4, Hesap ID (Google Ads: 123-456-7890, Meta: rakamlar, GA4: property ID), Aktif kutusu işaretli.').setFontStyle('italic');
+  acc.getRange(Math.max(rows.length, 1) + 8, 1).setValue('Hesap eklemek için yeni satır: Platform = Google Ads / Meta / GA4 / TikTok / Microsoft Ads / Yandex Direct / RTB House / Yango Ads / Criteo, Hesap ID (Google Ads: 123-456-7890, Meta: rakamlar, GA4: property ID, TikTok: advertiser ID, Yandex: Client-Login, RTB House: advertiser hash, Microsoft Ads: hesap numarası), Aktif kutusu işaretli.').setFontStyle('italic');
 
   var set = ss.insertSheet(SHEET_NAMES.settings);
   set.getRange(1, 1, 1, 3).setValues([['Anahtar', 'Değer', 'Açıklama']]).setFontWeight('bold');
@@ -87,7 +88,7 @@ function buildConfigSheets_(ss, dataFolderId, exportFolderId) {
     ['Accounts: rapora giren hesaplar. Aktif kutusunu kaldırarak hesabı hariç tutabilirsiniz. GA4 property\'leri buraya eklenir.'],
     ['Settings: ayarlar (API sürümü, lookback, Adjust/GA4 metrikleri).'],
     ['Registry: veri dosyalarının listesi (yıllık/aylık Google Sheets dosyaları, "data" klasöründe).'],
-    ['Queue: Meta / Adjust / GA4 çekim kuyruğu (backfill + günlük yenileme).'],
+    ['Queue: Meta / Adjust / GA4 / TikTok / Yandex / RTB House çekim kuyruğu (backfill + günlük yenileme). Manuel Veri: API\'si olmayan platformlar (Yango Ads, Criteo).'],
     ['FX: günlük kurlar (1 USD = X birim). Kaynak: fawazahmed0/currency-api.'],
     ['Log: senkron logları.'],
     ['Tokenlar (Meta, Adjust) güvenlik için burada değil, script özelliklerinde saklanır — web uygulamasındaki Durum sekmesinden girin.']
@@ -113,4 +114,17 @@ function seedGa4Brand_(ss) {
   sh.getRange(row, 5).setNumberFormat('@');
   sh.getRange(row, 1, 1, 10).setValues([['GA4', '', '', APP_NAME + ' GA4', gid, 'Global (ülke kırılımlı)', true, '', '', 'Pazarlar ülke kırılımıyla ayrılır']]);
   try { sh.getRange(row, 7).insertCheckboxes(); } catch (e) {}
+}
+
+/** Brand.js > SHARE_WITH hesaplarını rapor klasörüne düzenleyen olarak ekler (liste değişince bir kez). */
+function shareRoot_(ss) {
+  var list = (BRAND.SHARE_WITH || []).map(function (x) { return String(x).trim().toLowerCase(); }).filter(String);
+  var p = PropertiesService.getScriptProperties();
+  var key = list.join(',');
+  if (!key || p.getProperty('SHARED_WITH') === key) return;
+  var root = DriveApp.getFolderById(p.getProperty('ROOT_FOLDER_ID'));
+  var have = root.getEditors().map(function (u) { return String(u.getEmail()).toLowerCase(); });
+  list.forEach(function (em) { if (have.indexOf(em) < 0) root.addEditor(em); });
+  p.setProperty('SHARED_WITH', key);
+  sh_log_(ss, 'share', 'INFO', 'Rapor klasörü paylaşıldı (düzenleyen): ' + key);
 }
