@@ -93,6 +93,16 @@ function tiktok_get_(path, params, token) {
   return body.data || {};
 }
 
+/** Reklamveren yetkilendirmesinden sonra gelen auth_code'u (ya da yönlendirme linkini) uzun ömürlü access token'a çevirir. */
+function tiktok_exchange_(appId, secret, code) {
+  code = String(code || '').trim();
+  var m = /auth_code=([^&#\s]+)/.exec(code); if (m) code = decodeURIComponent(m[1]);
+  var body = fetchJson_(TIKTOK_BASE + 'oauth2/access_token/', { method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ app_id: String(appId).trim(), secret: String(secret).trim(), auth_code: code }) });
+  if (!body || body.code !== 0 || !body.data || !body.data.access_token)
+    throw new Error('TikTok ' + (body && body.code) + ': ' + ((body && body.message) || 'token alınamadı') + ' (auth_code 1 saat geçerli ve tek kullanımlık; gerekirse yetkilendirmeyi tekrarla)');
+  return body.data;
+}
 function tiktok_currency_(advId, token) {
   var d = tiktok_get_('advertiser/info/', { advertiser_ids: [String(advId)], fields: ['currency', 'name'] }, token);
   var a = (d.list || [])[0] || {};

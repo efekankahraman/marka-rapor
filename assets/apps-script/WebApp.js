@@ -282,6 +282,13 @@ function apiSaveSecrets(json, gk) { GK_ = gk || '';
       if (sh_settings_(ss).ADJUST_APP_TOKENS) needAdj = true;
       return 'Adjust token kaydedildi (…' + at.slice(-4) + ') · ' + t.summary;
     });
+    // TikTok: App ID + Secret + auth_code verildiyse token'ı rapor kendisi alır
+    if (o.ttApp && o.ttSec && o.ttCode) step('TikTok yetkilendirme', function () {
+      var d = tiktok_exchange_(o.ttApp, o.ttSec, o.ttCode);
+      p.setProperties({ TIKTOK_APP_ID: String(o.ttApp).trim(), TIKTOK_APP_SECRET: String(o.ttSec).trim() });
+      o.tiktok = d.access_token;
+      return 'TikTok token alındı · yetkili advertiser: ' + ((d.advertiser_ids || []).join(', ') || '-');
+    });
     Object.keys(EXT_TOKEN_PROP).forEach(function (k) {
       if (!o[k] || !String(o[k]).trim()) return;
       step(EXT_SOURCES[k], function () {

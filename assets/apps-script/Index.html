@@ -221,7 +221,9 @@
           <label>Adjust app token(lar)</label>
           <div class="row"><input type="text" id="inAdjApps" placeholder="abc123xyz,def456..."></div>
           <label>TikTok access token <span id="stTiktok" class="pill"></span> <span class="hint" title="TikTok for Business Developers > uygulama (Reporting izni) > reklamveren yetkilendirmesi ile alınan uzun ömürlü token">?</span></label>
-          <div class="row"><input type="password" id="inTiktok" placeholder="Access-Token"></div>
+          <div class="row"><input type="password" id="inTiktok" placeholder="Access-Token (varsa)"></div>
+          <div class="muted small">Token yoksa: uygulamanın yetkilendirme linkiyle reklam hesabını onayla, sonra aşağıya App ID, Secret ve yönlendirilen linki (ya da auth_code) yapıştırıp Kaydet. Token'ı rapor kendisi alır.</div>
+          <div class="row"><input type="text" id="inTtApp" placeholder="App ID"><input type="password" id="inTtSec" placeholder="Secret"><input type="text" id="inTtCode" placeholder="Yönlendirme linki ya da auth_code"></div>
           <label>Yandex Direct OAuth token <span id="stYandex" class="pill"></span> <span class="hint" title="oauth.yandex.com uygulaması (Direct API erişimi) ile ajans hesabından alınan token. Hesap ID = Client-Login">?</span></label>
           <div class="row"><input type="password" id="inYandex" placeholder="OAuth token"></div>
           <label>RTB House API token <span id="stRtbhouse" class="pill"></span></label>

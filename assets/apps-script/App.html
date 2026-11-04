@@ -1474,7 +1474,7 @@
     $('inAdjAcc').value = B.adjustAccount || '';
     $('btnSecrets').onclick = function () {
       var o = { meta: $('inMeta').value, adjust: $('inAdj').value, adjustApps: $('inAdjApps').value, adjustAccount: $('inAdjAcc').value,
-        tiktok: $('inTiktok').value, yandex: $('inYandex').value, rtbhouse: $('inRtbhouse').value, criteo: $('inCriteo').value, yango: $('inYango').value };
+        tiktok: $('inTiktok').value, ttApp: $('inTtApp').value, ttSec: $('inTtSec').value, ttCode: $('inTtCode').value, yandex: $('inYandex').value, rtbhouse: $('inRtbhouse').value, criteo: $('inCriteo').value, yango: $('inYango').value };
       call('apiSaveSecrets', JSON.stringify(o), 'Kaydediliyor…').then(function (r) {
         var sv = (r && r.saved) || {}, PROP = { tiktok: 'TIKTOK_TOKEN', yandex: 'YANDEX_TOKEN', rtbhouse: 'RTBHOUSE_TOKEN', criteo: 'CRITEO_CREDENTIALS', yango: 'YANGO_TOKEN' };
         $('secMsg').style.whiteSpace = 'pre-wrap'; $('secMsg').textContent = (r && r.message) || r;
