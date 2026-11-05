@@ -412,7 +412,31 @@ function bing_handle_(ss, b) {
 
 /** ext_campaign + ext_push satırlarını okur. cb(row, ix) */
 function ext_readAll_(ss, from, to, cb) {
-  return q_readShards_(ss, 'ext_campaign', from, to, cb) + q_readShards_(ss, 'ext_push', from, to, cb);
+  // Hesap ID'si sonradan değiştirilen hesapların (ör. Criteo adı → advertiser ID) eski satırları atlanır:
+  // platformun Accounts'ta en az bir hesabı varsa, orada olmayan hesap ID'lerinin satırları sayılmaz (çift harcama olmasın).
+  var known = {}, byPlat = {};
+  sh_accounts_(ss).forEach(function (a) { known[a.platform + '|' + a.id] = 1; byPlat[a.platform] = 1; });
+  var f = function (r, ix) {
+    var pl = ix.platform != null ? String(r[ix.platform]) : '';
+    if (pl && byPlat[pl] && !known[pl + '|' + String(r[1])]) return;
+    return cb(r, ix);
+  };
+  return q_readShards_(ss, 'ext_campaign', from, to, f) + q_readShards_(ss, 'ext_push', from, to, f);
+}
+/** Accounts'ta artık olmayan (ID'si değişmiş) ek platform hesaplarının satırlarını veri dosyalarından siler. */
+function ext_purgeStale_(ss) {
+  var known = {}, byPlat = {}, stale = {};
+  sh_accounts_(ss).forEach(function (a) { known[a.platform + '|' + a.id] = 1; byPlat[a.platform] = 1; });
+  var start = String(sh_settings_(ss).START_DATE || '2025-01-01'), to = sh_today_();
+  q_readShards_(ss, 'ext_campaign', start, to, function (r, ix) {
+    var pl = ix.platform != null ? String(r[ix.platform]) : '';
+    if (pl && byPlat[pl] && !known[pl + '|' + String(r[1])]) stale[String(r[1])] = pl;
+  });
+  Object.keys(stale).forEach(function (id) {
+    st_upsert_(ss, 'ext_campaign', EXT_HEADER, [], { accounts: [id], from: start, to: to }, EXT_TEXT);
+    sh_log_(ss, stale[id].toLowerCase().replace(/\s+/g, ''), 'INFO', 'Eski hesap ID\'sinin satırları silindi: ' + id + ' (' + stale[id] + ')');
+  });
+  return Object.keys(stale).length;
 }
 
 /* ======================= Yango Ads (space.yango.com, panelin kendi API'si) ======================= */

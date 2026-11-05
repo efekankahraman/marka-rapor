@@ -33,6 +33,7 @@ function runSync() {
     try { manual_sync_(ss); } catch (e) { sh_log_(ss, 'manuel', 'ERROR', e.message || e); }
     try { creative_syncDaily_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', e.message || e); }
     if (pp.getProperty('CRITEO_DIAG1') !== '1' && pp.getProperty('CRITEO_CREDENTIALS')) { pp.setProperty('CRITEO_DIAG1', '1'); try { criteo_probe_(ss); } catch (e) { sh_log_(ss, 'criteo', 'ERROR', 'teşhis: ' + (e.message || e)); } }
+    if (pp.getProperty('EXT_PURGE1') !== '1') { pp.setProperty('EXT_PURGE1', '1'); try { if (ext_purgeStale_(ss)) pp.deleteProperty('CUBE_CUR'); } catch (e) { sh_log_(ss, 'ext', 'ERROR', 'eski hesap temizliği: ' + (e.message || e)); } }
     try { extad_syncAll_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', 'diğer mecralar: ' + (e.message || e)); }
     // Önce kuyruk (küp kurulumu 2-7 dk sürebildiği için önce kurulursa kuyruğa zaman kalmıyordu)
     var r = processQueue_(ss, t0);
