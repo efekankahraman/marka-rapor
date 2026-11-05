@@ -1799,6 +1799,13 @@
       res.items.forEach(crDerive); CRS.res = res; CRS.n = 60; drawCreative();
     }).catch(fail);
   }
+  // Kartın üstündeki tür etiketi. Meta'nın ham object_type değerleri (SHARE = bağlantılı gönderi reklamı vb.) okunur hale getirilir
+  var META_TY = { SHARE: 'Görsel', PHOTO: 'Görsel', VIDEO: 'Video', STATUS: 'Gönderi', APPLICATION: 'Uygulama', EVENT: 'Etkinlik', OFFER: 'Teklif', PAGE: 'Sayfa', DOMAIN: 'Bağlantı', INVALID: '' };
+  function crTy(x) {
+    if (!x.ty && !(x.p === 'Meta' && x.vi)) return '';
+    if (x.p === 'Meta') return x.vi ? 'Video' : (META_TY[x.ty] != null ? META_TY[x.ty] : 'Reklam');
+    return CR_FT[x.ty] || String(x.ty).replace(/_AD$/, '').replace(/_/g, ' ').toLowerCase();
+  }
   function crDerive(x) { if (x.p === 'Google Ads' && /^(Görsel|YouTube) \S+$/.test(x.n || '')) x.n = (CR_FT[x.ty] || (x.vi ? 'Video' : 'Görsel')) + (x.g ? ' · ' + x.g : ''); x.ctr = div(x.k, x.i); x.cpc = div(x.s, x.k); x.roas = div(x.v, x.s); x.cpa = div(x.s, x.cv); return x; }
   function crList() {
     if (!CRS.res) return [];
@@ -1918,7 +1925,7 @@
     if (x.pl) link += '<a href="' + esc(x.pl) + '" target="_blank" rel="noopener">Instagram ↗</a>';
     var cvL = x.p === 'Meta' ? 'Purchase' : 'Dönüşüm';
     return '<div class="cr-card"><div class="cr-media" data-crk="' + esc(crReg(x)) + '">' + media + (x.vi ? '<span class="cr-play">▶</span>' : '') + (x.grp ? '<span class="cr-cnt">' + x.grp.length + ' varyasyon</span>' : '') + (/Google Ads/.test(x.p) && x.src ? '<span class="cr-src' + (crAuto(x) ? ' auto' : '') + '">' + (crAuto(x) ? 'Otomatik' : 'Eklenen') + '</span>' : '') +
-      '<span class="cr-badge">' + esc(x.p) + (x.ty ? ' · ' + esc(CR_FT[x.ty] || String(x.ty).replace(/_AD$/, '').replace(/_/g, ' ').toLowerCase()) : '') + '</span>' +
+      '<span class="cr-badge">' + esc(x.p) + (crTy(x) ? ' · ' + esc(crTy(x)) : '') + '</span>' +
       '</div>' +
       '<div class="cr-body"><div class="cr-name" title="' + esc(x.n) + '">' + esc(x.n || x.id) + '</div><div class="cr-sub" title="' + esc(x.c + ' › ' + x.g) + '">' + esc(x.c) + (x.p === 'Google Ads' && x.g ? ' › ' + esc(x.g) : '') + '</div>' +
       '<div class="cr-m"><div><span>Harcama</span><b>' + kpiFmt(x.s, 'usd') + '</b></div><div><span>Gösterim</span><b>' + fmtShort(x.i, 'int') + '</b></div><div><span>CTR</span><b>' + fmt(x.ctr, 'pct') + '</b></div>' +
