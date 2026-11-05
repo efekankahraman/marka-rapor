@@ -22,7 +22,7 @@ function runSync() {
       t0 = Date.now();
     }
     // rapor para birimi değiştiyse küp yeniden kurulur
-    if (pp.getProperty('CUBE_CUR') !== REPORT_CUR + '|sm1') { try { cube_build_(ss); pp.setProperty('CUBE_CUR', REPORT_CUR + '|sm1'); } catch (e) { sh_log_(ss, 'cube', 'ERROR', e.message || e); } t0 = Date.now(); }
+    if (pp.getProperty('CUBE_CUR') !== REPORT_CUR + '|org1') { try { cube_build_(ss); pp.setProperty('CUBE_CUR', REPORT_CUR + '|org1'); } catch (e) { sh_log_(ss, 'cube', 'ERROR', e.message || e); } t0 = Date.now(); }
     maybeDaily_(ss);
     // App sekmesi verisi: ilk kez geçmişi kuyruğa al
     if (pp.getProperty('META_CPAS1') !== '1' && (BRAND.CPAS_ACCOUNTS || []).length) { try { enqueueBackfill_(ss, ['meta']); pp.setProperty('META_CPAS1', '1'); } catch (e) { sh_log_(ss, 'meta', 'ERROR', e.message || e); } }

@@ -17,6 +17,18 @@ var QCACHE_TTL = 6 * 3600;       // sn
 var CUBE_SUM_KEYS = ['spend', 'spend_usd', 'clicks', 'impressions', 'installs',
   'ga_sessions', 'ga_purchases', 'ga_revenue_usd', 'adj_sessions', 'adj_purchases', 'adj_revenue_usd', 'adj_installs', 'adj_c_purchases', 'adj_c_revenue_usd'];
 
+/* Organik / Direct: reklam dışı trafik mecra kırılımında ayrı bir "mecra" olarak gösterilir.
+   Web = GA4 (ga4_web) organik kanalları, App = Adjust'ta kampanyası olmayan (Organic) trafik. Harcaması yoktur. */
+var ORG_PLATFORM = 'Organik / Direct';
+var ORG_CHANNELS_DEF = 'Direct,Organic Search,Organic Social,Organic Video,Organic Shopping,Referral';
+function org_acct_(ss) {
+  var g = sh_accounts_(ss, 'GA4').filter(function (a) { return a.active; })[0];
+  var code = (g && g.code) || Object.keys((typeof BRAND !== 'undefined' && BRAND.MARKETS) || { TR: 1 })[0];
+  return { platform: ORG_PLATFORM, id: 'organic', code: code, name: ORG_PLATFORM, tip: 'Organik', active: true, currency: '' };
+}
+function org_enabled_(ss) {
+  return sh_accounts_(ss, 'GA4').some(function (a) { return a.active; }) || !!String(sh_settings_(ss).ADJUST_APP_TOKENS || '').trim();
+}
 function cube_build_(ss) {
   var t0 = Date.now();
   var s = sh_settings_(ss);
@@ -138,6 +150,7 @@ function cube_build_(ss) {
     var id = r_cid_(name);
     var ci = id && byId[id] != null ? byId[id] : r_ckLookup_(byKey, name);
     if (ci == null) ci = mapLookup('Adjust', name);
+    if (ci == null && name === '(kampanyasız)') ci = camp(ORG_PLATFORM, 'organic', 'app-organic', 'App · Organic (Adjust)', acur);
     if (ci == null) { miss('Adjust', r[0].slice(0, 7), name, String(r[ix.country] || ''), sess, pur); return; }
     diag.adj.matched += sess;
     var rate = perUsd(r[0], acur);
@@ -148,6 +161,21 @@ function cube_build_(ss) {
     rr[15] += ix.cohort_revenue != null && rate ? (+r[ix.cohort_revenue] || 0) / rate : 0;
   });
 
+  // Organik / Direct · Web: GA4 kanal verisinden (Web sekmesiyle aynı kaynak) reklam dışı kanallar
+  try {
+    var orgCh = String(s.ORGANIC_CHANNELS || ORG_CHANNELS_DEF).split(',').map(function (x) { return x.trim(); }).filter(String);
+    var gcur = {}; sh_accounts_(ss, 'GA4').forEach(function (a) { gcur[a.id] = a.currency || 'TRY'; });
+    q_readShards_(ss, 'ga4_web', from, to, function (r, ix) {
+      var ch = String(r[ix.channel] || '');
+      if (orgCh.indexOf(ch) < 0) return;
+      var cur = gcur[String(r[1])] || 'TRY', rate = perUsd(r[0], cur);
+      var ci = camp(ORG_PLATFORM, 'organic', 'web-' + ch.toLowerCase().replace(/\s+/g, '-'), 'Web · ' + ch, cur);
+      var rr = row(r[0], ci);
+      rr[7] += ix.sessions != null ? +r[ix.sessions] || 0 : 0;
+      rr[8] += ix.ecommercePurchases != null ? +r[ix.ecommercePurchases] || 0 : 0;
+      rr[9] += rate && ix.purchaseRevenue != null ? (+r[ix.purchaseRevenue] || 0) / rate : 0;
+    });
+  } catch (e) { sh_log_(ss, 'cube', 'WARN', 'organik web: ' + (e.message || e)); }
   var list = [];
   for (var k in rows) list.push(rows[k].map(function (v, i) { return i > 1 && typeof v === 'number' ? Math.round(v * 100) / 100 : v; }));
   var um = Object.keys(unmatched).map(function (k) { return unmatched[k]; });
@@ -239,8 +267,9 @@ function q_reportCube_(ss, p, cube) {
   var pickFn = r_pickFn_(f);
 
   // kampanya boyutlarını bir kez hesapla (filtre dışı = null)
+  var orgA = org_acct_(ss);
   var dims = cube.camps.map(function (c) {
-    var a = acc[c[0] + '|' + c[1]];
+    var a = acc[c[0] + '|' + c[1]] || (c[0] === ORG_PLATFORM ? orgA : null);
     if (!a || !a.active) return null;
     if (plat && !plat[c[0]]) return null;
     if (cset && !cset[a.code]) return null;
@@ -248,7 +277,7 @@ function q_reportCube_(ss, p, cube) {
     if (tips && !tips.some(function (t) { return a.tip.indexOf(t) >= 0; })) return null;
     if (inc && !inc.test(c[3])) return null;
     if (exc && exc.test(c[3])) return null;
-    if (kindFn && !kindFn(c[3])) return null;
+    if (kindFn && c[0] !== ORG_PLATFORM && !kindFn(c[3])) return null;
     var d = { platform: c[0], country: a.code, tip: a.tip, account_name: a.name, account_id: c[1], campaign_id: c[2], campaign_name: c[3], currency: c[4] };
     for (var k in eq) if (eq[k] !== '' && eq[k] != null && String(d[k]) !== String(eq[k])) return null;
     if (pickFn && !pickFn(d)) return null;

@@ -38,6 +38,7 @@ var DEFAULT_SETTINGS = [
   ['ADJUST_METRICS', 'installs,sessions,revenue,revenue_events', 'Adjust Report Service metrikleri (event: <slug>_events)'],
   ['ADJUST_EXCLUDE_COUNTRIES', (BRAND.EXCLUDE_MARKET_CODES || []).join(',').toLowerCase(), 'Hariç tutulacak ülke kodları'],
   ['ADJUST_LOOKBACK_DAYS', '7', 'Adjust günlük yenileme geriye dönük gün'],
+  ['ORGANIC_CHANNELS', 'Direct,Organic Search,Organic Social,Organic Video,Organic Shopping,Referral', 'Raporda "Organik / Direct" mecrasına giren GA4 kanalları (Web sekmesindeki kanal adları, virgülle)'],
   ['GA4_DIMENSIONS', 'sessionCampaignName,sessionSourceMedium', 'GA4 boyutları (date otomatik eklenir). Rapor önce kampanya adıyla, olmazsa kaynak / araçla mecraya eşleştirir'],
   ['GA4_METRICS', 'sessions,ecommercePurchases,purchaseRevenue', 'GA4 metrikleri'],
   ['GA4_EXCLUDE_COUNTRIES', (BRAND.EXCLUDE_MARKET_NAMES || []).join(','), 'GA4 country boyutunda hariç tutulacaklar'],

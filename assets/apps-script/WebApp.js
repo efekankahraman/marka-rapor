@@ -84,6 +84,7 @@ function apiBootstrap(_a, gk) { GK_ = gk || '';
     var accounts = sh_accounts_(ss).filter(function (a) { return a.active && adPlats.indexOf(a.platform) >= 0; })
       .map(function (a) { return { key: a.platform + '|' + a.id, platform: a.platform, code: a.code, name: a.name, tip: a.tip }; });
     var platforms = adPlats.filter(function (pl) { return accounts.some(function (a) { return a.platform === pl; }); });
+    if (org_enabled_(ss)) { var oa = org_acct_(ss); accounts.push({ key: ORG_PLATFORM + '|organic', platform: ORG_PLATFORM, code: oa.code, name: oa.name, tip: oa.tip }); platforms.push(ORG_PLATFORM); }
     var countries = Object.keys(COUNTRIES).filter(function (c) { return !excludedMarket_(c); }).map(function (c) { return { code: c, name: COUNTRIES[c].tr }; });
     var out = {
       accounts: accounts,
