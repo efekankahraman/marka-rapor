@@ -15,7 +15,7 @@ var ADS_LEVELS = {
 };
 
 var FIELD_LABELS = {
-  period: 'Dönem', platform: 'Mecra', country: 'Ülke', tip: 'Tip', account_name: 'Hesap', account_id: 'Hesap ID',
+  period: 'Dönem', kgroup: 'Kampanya grubu', platform: 'Mecra', country: 'Ülke', tip: 'Tip', account_name: 'Hesap', account_id: 'Hesap ID',
   currency: 'Para birimi', campaign_name: 'Kampanya', campaign_id: 'Kampanya ID', adgroup_name: 'Ad group / Ad set',
   adgroup_id: 'Ad group ID', ad_name: 'Ad', ad_id: 'Ad ID', ad_type: 'Ad tipi', channel: 'Kanal',
   app: 'App', os: 'OS', partner: 'Network', campaign: 'Kampanya', adgroup: 'Adgroup', property: 'GA4 property'
@@ -90,6 +90,15 @@ function q_kindFn_(f) {
   if (e === c || !BRAND.CAMPAIGN_GROUP || !BRAND.CAMPAIGN_GROUP.KEYWORD) return null;
   var re = q_regex_(BRAND.CAMPAIGN_GROUP.KEYWORD);
   return function (name) { return re.test(String(name || '')) === e; };
+}
+
+/** Kampanyanın grubu (Kampanya grubu seviyesi / kolonu için etiket): IN_LABEL | OUT_LABEL; organik satırlar ayrı. */
+function q_kindOf_(name, platform) {
+  var g = BRAND.CAMPAIGN_GROUP;
+  if (!g || !g.KEYWORD) return '';
+  if (typeof ORG_PLATFORM !== 'undefined' && platform === ORG_PLATFORM) return ORG_PLATFORM;
+  if (!q_kindOf_.re) q_kindOf_.re = q_regex_(g.KEYWORD);
+  return q_kindOf_.re.test(String(name || '')) ? (g.IN_LABEL || 'Grup') : (g.OUT_LABEL || 'Diğer');
 }
 
 function q_regex_(s) {

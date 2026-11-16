@@ -143,7 +143,7 @@ function apiQuery(paramsJson, gk) { GK_ = gk || '';
     var eq = (p.filters && p.filters.eq) || {};
     var cubeOk = p.level !== 'adgroup' && p.level !== 'ad' &&
       Object.keys(eq).every(function (k) { return ['account_id', 'campaign_id', 'platform'].indexOf(k) >= 0; }) &&
-      (!(p.filters && p.filters.pick) || p.filters.pick.fields.every(function (k) { return ['country', 'platform', 'account_id', 'campaign_id'].indexOf(k) >= 0; }));
+      (!(p.filters && p.filters.pick) || p.filters.pick.fields.every(function (k) { return ['kgroup', 'country', 'platform', 'account_id', 'campaign_id'].indexOf(k) >= 0; }));
     // 2) küp: önceden eşleştirilmiş tek dosya (hızlı)  3) yoksa canlı hesap (ad seviyesi / küp henüz kurulmadıysa)
     var cube = cubeOk ? cube_load_() : null;
     return cmp_run_(p, function (q) { return cube ? q_reportCube_(ss, q, cube) : q_report_(ss, q); });

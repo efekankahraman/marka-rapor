@@ -45,9 +45,10 @@ var BRAND = {
   EXCLUDE_MARKET_NAMES: [],
 
   // Kampanya grubu filtresi: kampanya adında KEYWORD geçenler bir grup, geçmeyenler diğer grup.
-  // Kullanılmayacaksa null yapın.  DEFAULT: 'in' = raporda varsayılan olarak sadece KEYWORD geçenler, 'out' = geçmeyenler, '' = hepsi
+  // Kullanılmayacaksa null yapın. Tanımlıysa rapor "Kampanya grubu" seviyesiyle açılır (gruplar yan yana, filtre yok);
+  // bir gruba tıklayınca o gruba filtrelenip ülke (tek pazarda mecra) seviyesine iner. Filtre çubuğundan da seçilebilir.
   CAMPAIGN_GROUP: null,
-  // Örnek: { KEYWORD: 'ecom', IN_LABEL: 'E-com (performans)', OUT_LABEL: 'Kurumsal', DEFAULT: 'in' },
+  // Örnek: { KEYWORD: 'ecom', IN_LABEL: 'E-com (performans)', OUT_LABEL: 'Kurumsal' },
 
   // Reklam hesapları: [Platform, Ülke kodu, Hesap adı, Hesap ID, Tip, Not]
   //   Platform: 'Google Ads' (ID: 123-456-7890) ya da 'Meta' (ID: act_ olmadan rakamlar)

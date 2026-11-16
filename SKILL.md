@@ -64,7 +64,7 @@ Varsayımla ilerleme. AskUserQuestion ile, birbirine bağlı soruları tek turda
    - Kullanıcıdan liste yapıştırmasını ya da Excel/CSV eklemesini iste.
    - Bağlantıların varsa hesapları oradan bulup onaylatabilirsin.
 6. **Kampanya grubu filtresi.** Kampanya adlarında grubu ayıran bir kelime var mı? Ör. performans kampanyalarında "ecom" geçiyor, kurumsallarda geçmiyor.
-   - Varsa kelimeyi, iki grubun adını ve varsayılan grubu al.
+   - Varsa kelimeyi ve iki grubun adını al. Rapor bu gruplarla açılır (Kampanya grubu seviyesi), tıklayınca ilgili gruba iner.
    - Yoksa `CAMPAIGN_GROUP: null`.
 7. **CPAS / Collaborative Ads.** Pazaryeri (Trendyol, Hepsiburada…) ile Collaborative Ads yürüten bir Meta hesabı var mı?
    - Varsa hesap ID'sini `CPAS_ACCOUNTS`'a, sekme adını `CPAS_LABEL`'a yaz. Bu hesap ana rapora girmez, kendi sekmesinde görünür.

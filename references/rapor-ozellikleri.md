@@ -34,6 +34,7 @@ Config > Manuel Veri ────────┘                                
 - **Kayıtlı raporlar:** filtreler, tarih (son N gün olarak da), seviye, kolonlar, kartlar ve karşılaştırma ayarı ad verilerek kaydedilir. Görünürlük: **Özel** (sadece ben + paylaştığım e-postalar) ya da **Herkese açık**. Her rapor `?r=ID` linkiyle açılır.
 - **Karşılaştırma:** tarih seçicinin yanındaki "Karşılaştır". Önceki dönem (varsayılan), geçen yıl aynı dönem ya da özel aralık. Değişim yüzdesi kartlarda ve tablodaki her hücrede görünür; maliyet metriklerinde düşüş yeşildir. Tüm sekmelerde geçerli.
 - **Hedef kartları:** Hedefler sekmesinde girilen hedefler (satış tutarı, satış adedi, session, harcama) seçili tarih aralığına göre gün oranlı hesaplanıp ilerleme kartı olarak görünür. "Bu ay" seçiliyken beklenen tempo çizgisi ve ay sonu tahmini de var.
+- **Kampanya grubu seviyesi:** CAMPAIGN_GROUP tanımlıysa rapor "Kampanya grubu" seviyesiyle açılır (ör. E-com / Kurumsal yan yana). Bir gruba tıklayınca o gruba filtrelenmiş olarak ülke seviyesine iner; üstteki etiketten çıkılır. Varsayılan filtre yoktur.
 - **Filtreler:** ülke, mecra, hesap, kampanya grubu (CAMPAIGN_GROUP varsa), kampanya adı içerir / içermez (YA DA / VE), metrik filtresi (ör. ROAS > 3), seçili satırlarla sınırla.
 - **Trend:** birden çok metrik, isteğe bağlı kırılım, metrik başına grafik ya da tek grafik (endeks).
 - CSV ve "Google Sheets'e aktar" görünen kolonları ve (varsa) seçili satırları içerir.

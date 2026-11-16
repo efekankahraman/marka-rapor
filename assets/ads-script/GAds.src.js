@@ -58,18 +58,41 @@ function main() {
     if (processRange_(ss, accessible, from, today)) sh_setState_(ss, STATE_PREFIX + 'LAST_REFRESH', sh_now_());
   }
 
-  // 2) Backfill — ay ay geriye doğru
+  // 2) Backfill — ay ay geriye doğru; her hesap ayrı yazılır ve ilerleme kaydedilir.
+  //    Script süre sınırında kesilse bile bir sonraki çalıştırma kaldığı hesaptan devam eder;
+  //    bir hesap 2 kez yarıda kalırsa o ay için atlanır (ay takılı kalmaz).
   if (sh_getState_(ss, STATE_PREFIX + 'BACKFILL_DONE') !== 'yes') {
     var cursor = sh_getState_(ss, STATE_PREFIX + 'BACKFILL_CURSOR') || today.slice(0, 7);
+    var progKey = STATE_PREFIX + 'BACKFILL_PROG';
     while (cursor >= start.slice(0, 7)) {
-      if (remaining_() < MIN_SECONDS_FOR_MONTH) break;
+      if (remaining_() < MIN_SECONDS_PER_ACCOUNT * 2) break;
       var mFrom = cursor + '-01';
       var mTo = sh_monthEnd_(mFrom);
       if (mTo > today) mTo = today;
       if (mFrom < start) mFrom = start;
-      if (!processRange_(ss, accessible, mFrom, mTo)) break;
+      var prog = null;
+      try { prog = JSON.parse(sh_getState_(ss, progKey) || 'null'); } catch (e) { prog = null; }
+      if (!prog || prog.m !== cursor) prog = { m: cursor, done: [], tries: {} };
+      var cutM = false, nDone = 0;
+      for (var ai = 0; ai < accessible.length; ai++) {
+        var acc = accessible[ai], aid = acc.getCustomerId();
+        if (prog.done.indexOf(aid) >= 0) continue;
+        if ((prog.tries[aid] || 0) >= 2) {
+          sh_log_(ss, 'gads', 'WARN', aid + ' ' + cursor + ': 2 kez süre sınırına takıldı, bu ay atlandı');
+          prog.done.push(aid); sh_setState_(ss, progKey, JSON.stringify(prog)); continue;
+        }
+        if (remaining_() < MIN_SECONDS_PER_ACCOUNT) { cutM = true; break; }
+        prog.tries[aid] = (prog.tries[aid] || 0) + 1;
+        sh_setState_(ss, progKey, JSON.stringify(prog));
+        processRange_(ss, [acc], mFrom, mTo, true);
+        prog.done.push(aid); nDone++;
+        sh_setState_(ss, progKey, JSON.stringify(prog));
+      }
+      if (cutM) { if (nDone) sh_log_(ss, 'gads', 'INFO', 'Backfill ' + cursor + ': ' + prog.done.length + '/' + accessible.length + ' hesap (devam edecek)'); break; }
+      sh_log_(ss, 'gads', 'INFO', 'Backfill ' + cursor + ' tamam (' + accessible.length + ' hesap)');
       cursor = sh_addDays_(cursor + '-01', -1).slice(0, 7);
       sh_setState_(ss, STATE_PREFIX + 'BACKFILL_CURSOR', cursor);
+      sh_setState_(ss, progKey, '');
     }
     if (cursor < start.slice(0, 7)) {
       sh_setState_(ss, STATE_PREFIX + 'BACKFILL_DONE', 'yes');
@@ -98,7 +121,7 @@ function parseTs_(s) {
 }
 
 /** Tüm erişilebilir hesaplar için [from,to] çek + yaz. Tamamı bitti ise true. */
-function processRange_(ss, accounts, from, to) {
+function processRange_(ss, accounts, from, to, quiet) {
   var camp = [], ads = [], done = [], cur = {}, cut = false;
   for (var i = 0; i < accounts.length; i++) {
     if (remaining_() < MIN_SECONDS_PER_ACCOUNT) { cut = true; break; }
@@ -123,7 +146,7 @@ function processRange_(ss, accounts, from, to) {
   st_upsert_(ss, 'gads_ad' + DATASET_SUFFIX, GADS_AD_HEADER, ads, rep, GADS_TEXT);
   if (!cut) processAssets_(ss, accounts, from, to);
   sh_updateAccounts_(ss, 'Google Ads', cur);
-  sh_log_(ss, 'gads', 'INFO', from + '→' + to + ': ' + done.length + ' hesap, ' + camp.length + ' kampanya satırı, ' + ads.length + ' ad satırı');
+  if (!quiet) sh_log_(ss, 'gads', 'INFO', from + '→' + to + ': ' + done.length + ' hesap, ' + camp.length + ' kampanya satırı, ' + ads.length + ' ad satırı');
   return !cut;
 }
 

@@ -278,7 +278,7 @@ function q_reportCube_(ss, p, cube) {
     if (inc && !inc.test(c[3])) return null;
     if (exc && exc.test(c[3])) return null;
     if (kindFn && c[0] !== ORG_PLATFORM && !kindFn(c[3])) return null;
-    var d = { platform: c[0], country: a.code, tip: a.tip, account_name: a.name, account_id: c[1], campaign_id: c[2], campaign_name: c[3], currency: c[4] };
+    var d = { platform: c[0], country: a.code, tip: a.tip, kgroup: q_kindOf_(c[3], c[0]), account_name: a.name, account_id: c[1], campaign_id: c[2], campaign_name: c[3], currency: c[4] };
     for (var k in eq) if (eq[k] !== '' && eq[k] != null && String(d[k]) !== String(eq[k])) return null;
     if (pickFn && !pickFn(d)) return null;
     return d;
@@ -291,7 +291,7 @@ function q_reportCube_(ss, p, cube) {
     var d = dims[r[1]];
     if (!d) continue;
     agg.add({
-      date: r[0], platform: d.platform, country: d.country, tip: d.tip, account_name: d.account_name, account_id: d.account_id,
+      date: r[0], platform: d.platform, country: d.country, tip: d.tip, kgroup: d.kgroup, account_name: d.account_name, account_id: d.account_id,
       campaign_name: d.campaign_name, campaign_id: d.campaign_id, currency: d.currency,
       spend: r[2], spend_usd: r[3], clicks: r[4], impressions: r[5], installs: r[6],
       ga_sessions: r[7], ga_purchases: r[8], ga_revenue_usd: r[9],

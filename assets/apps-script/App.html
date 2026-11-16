@@ -104,7 +104,7 @@
     trend: { grain: 'week', metrics: ['spend_usd'], brk: 'none', mode: 'multi', res: null }
   };
   var LEVEL_ORDER = ['total', 'country', 'platform', 'account', 'campaign', 'adgroup', 'ad'];
-  var LEVEL_LABELS = { total: 'Toplam', country: 'Ülke', platform: 'Mecra', account: 'Hesap', campaign: 'Kampanya', adgroup: 'Ad group / Ad set', ad: 'Ad' };
+  var LEVEL_LABELS = { total: 'Toplam', kgroup: 'Kampanya grubu', country: 'Ülke', platform: 'Mecra', account: 'Hesap', campaign: 'Kampanya', adgroup: 'Ad group / Ad set', ad: 'Ad' };
   var GRAINS = [['none', 'Dönemsiz'], ['day', 'Günlük'], ['week', 'Haftalık'], ['month', 'Aylık']];
   var GROUPS = [['ga4', 'GA4 Web'], ['adj', 'Adjust']];
   // Varsayılan kolon sırası (Görünüm ile kişi başına değiştirilebilir)
@@ -258,6 +258,7 @@
   function drillPreds() {
     var pr = [];
     S.ads.drill.forEach(function (d) {
+      if (d.kgroup) pr.push({ col: 'kgroup', v: d.kgroup });
       if (d.country) pr.push({ col: 'country', v: d.country });
       if (d.platform) pr.push({ col: 'platform', v: d.platform });
       if (d.field) pr.push({ col: d.field, v: d.value });
@@ -267,6 +268,8 @@
   function drillParams(level, grain) {
     var p = baseParams(level, grain);
     S.ads.drill.forEach(function (d) {
+      if (d.kinds) p.filters.kinds = d.kinds.slice();
+      if (d.orgOnly) p.filters.platforms = [d.orgOnly];
       if (d.platform) p.filters.platforms = [d.platform];
       if (d.country) p.filters.countries = [d.country];
       if (d.field) p.filters.eq[d.field] = d.value;
@@ -278,7 +281,7 @@
   var prefetchQ = [], prefetching = false;
   function schedulePrefetch() {
     var g = S.ads.grain;
-    var lv = ['campaign', 'country', 'platform', 'account', 'total'].filter(function (l) { return LEVEL_ORDER.indexOf(l) >= 0; });
+    var lv = ['kgroup', 'campaign', 'country', 'platform', 'account', 'total'].filter(function (l) { return LEVEL_ORDER.indexOf(l) >= 0; });
     if (daysSel() <= B.adMaxDays) lv.push('adgroup');
     prefetchQ = lv.map(function (l) { return baseParams(l, g); });
     // trend kırılımları (açıksa)
@@ -938,7 +941,7 @@
   /* ================= RAPOR ================= */
   function adsOpt() {
     return { hideIds: !S.ads.ids, groups: S.ads.groups, order: effCols(), selectable: true, onSel: selInfo,
-      drill: { country: 1, platform: 1, account_name: 1, campaign_name: 1, adgroup_name: 1 }, onDrill: drillAds };
+      drill: { kgroup: 1, country: 1, platform: 1, account_name: 1, campaign_name: 1, adgroup_name: 1 }, onDrill: drillAds };
   }
   function drawLevelSeg() {
     seg($('adsLevel'), LEVEL_ORDER.map(function (l) { return [l, LEVEL_LABELS[l]]; }), S.ads.level, function (v) { S.ads.level = v; loadAds(); });
@@ -1297,7 +1300,14 @@
     S.ads.res.columns.forEach(function (c, i) { idx[c.k] = i; });
     var v = function (k) { return idx[k] != null ? row[idx[k]] : ''; };
     var next;
-    if (key === 'country') { S.ads.drill.push({ country: v('country'), label: countryName(v('country')) }); next = 'account'; }
+    if (key === 'kgroup') {
+      var g = B.campaignGroup || {}, kv = v('kgroup');
+      var kd = { kgroup: kv, label: kv };
+      if (kv === g.inLabel) kd.kinds = ['ecom']; else if (kv === g.outLabel) kd.kinds = ['kurumsal']; else kd.orgOnly = kv;
+      S.ads.drill.push(kd);
+      next = LEVEL_ORDER.indexOf('country') >= 0 ? 'country' : 'platform';
+    }
+    else if (key === 'country') { S.ads.drill.push({ country: v('country'), label: countryName(v('country')) }); next = 'account'; }
     else if (key === 'platform') { S.ads.drill.push({ country: v('country'), platform: v('platform'), label: (B.showCountry ? countryName(v('country')) + ' › ' : '') + v('platform') }); next = 'account'; }
     else if (key === 'account_name') { S.ads.drill.push({ field: 'account_id', value: v('account_id'), platform: v('platform'), label: v('account_name') }); next = 'campaign'; }
     else if (key === 'campaign_name') { S.ads.drill.push({ field: 'campaign_id', value: v('campaign_id'), label: v('campaign_name') }); next = 'adgroup'; }
@@ -2246,7 +2256,13 @@
     }
     // Kampanya grubu filtresi (Brand.js > CAMPAIGN_GROUP): yoksa filtre gizlenir
     if (!B.campaignGroup) { FDEFS = FDEFS.filter(function (d) { return d.k !== 'kinds'; }); S.f.kinds = []; }
-    else S.f.kinds = B.campaignGroup.def === 'in' ? ['ecom'] : B.campaignGroup.def === 'out' ? ['kurumsal'] : [];
+    else {
+      // Rapor "Kampanya grubu" seviyesiyle açılır (gruplar yan yana); satıra tıklayınca o gruba iner
+      S.f.kinds = [];
+      LEVEL_ORDER.splice(1, 0, 'kgroup');
+      PICK_FIELDS.kgroup = ['kgroup'];
+      S.ads.level = 'kgroup';
+    }
     $('app').classList.remove('hidden');
     preset('30');
     $('fFrom').min = $('fTo').min = B.startDate;

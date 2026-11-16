@@ -21,6 +21,12 @@ var R_LEVELS = {
   ad: ['country', 'platform', 'account_name', 'account_id', 'campaign_name', 'campaign_id', 'adgroup_name', 'adgroup_id', 'ad_name', 'ad_id', 'ad_type']
 };
 
+// Kampanya grubu (Brand.js > CAMPAIGN_GROUP) varsa en üstte "Kampanya grubu" seviyesi: rapor bununla açılır,
+// satıra tıklayınca o gruba filtrelenip ülke (ya da mecra) seviyesine iner.
+if (BRAND.CAMPAIGN_GROUP && BRAND.CAMPAIGN_GROUP.KEYWORD) {
+  R_LEVELS = (function (o) { var n = { total: o.total, kgroup: ['kgroup'] }; Object.keys(o).forEach(function (k) { if (k !== 'total') n[k] = o[k]; }); return n; })(R_LEVELS);
+}
+
 // Tek pazarlı markada ülke boyutu raporda yer almaz: Ülke seviyesi kalkar, diğer seviyelerden ülke kolonu çıkar
 if (!showCountry_()) {
   delete R_LEVELS.country;
@@ -30,12 +36,12 @@ if (!showCountry_()) {
 function r_sum_(a, b) { return (a || 0) + (b || 0); }
 
 /** Kullanıcının seçtiği boyutlar (Görünüm > Boyutlar). Seviyede izin verilenler dışında kalanlar atılır; boşsa seviyenin varsayılanı. */
-var R_DIM_ALL = ['platform', 'country', 'tip', 'account_name', 'account_id', 'campaign_name', 'campaign_id', 'adgroup_name', 'adgroup_id', 'ad_name', 'ad_id', 'ad_type'];
+var R_DIM_ALL = ['kgroup', 'platform', 'country', 'tip', 'account_name', 'account_id', 'campaign_name', 'campaign_id', 'adgroup_name', 'adgroup_id', 'ad_name', 'ad_id', 'ad_type'];
 function r_dims_(p, level) {
   var base = R_LEVELS[level] || R_LEVELS.campaign;
   if (!p || !p.dims || !p.dims.length) return base;
-  var max = level === 'ad' ? 12 : level === 'adgroup' ? 9 : 7;
-  var ok = R_DIM_ALL.slice(0, max).filter(function (f) { return showCountry_() || f !== 'country'; });
+  var max = level === 'ad' ? 13 : level === 'adgroup' ? 10 : 8;
+  var ok = R_DIM_ALL.slice(0, max).filter(function (f) { return (showCountry_() || f !== 'country') && (f !== 'kgroup' || !!R_LEVELS.kgroup); });
   var out = [];
   p.dims.forEach(function (f) { if (ok.indexOf(f) >= 0 && out.indexOf(f) < 0) out.push(f); });
   return out.length ? out : base;
@@ -133,7 +139,7 @@ function q_report_(ss, p) {
   function accept(o) {
     var a = acc[o.platform + '|' + o.account_id];
     if (!a || !a.active) return;
-    o.country = a.code; o.tip = a.tip; o.account_name = a.name;
+    o.country = a.code; o.tip = a.tip; o.account_name = a.name; o.kgroup = q_kindOf_(o.campaign_name, o.platform);
     if (cset && !cset[a.code]) return;
     if (aset && !aset[o.platform + '|' + o.account_id]) return;
     if (tips && !tips.some(function (t) { return a.tip.indexOf(t) >= 0; })) return;
@@ -148,7 +154,7 @@ function q_report_(ss, p) {
     agg.add(o);
     var ck = r_ckey_(o.campaign_name);
     if (!byKey[ck]) {
-      var dims = { platform: o.platform, country: o.country, tip: o.tip, account_name: o.account_name, account_id: o.account_id,
+      var dims = { platform: o.platform, country: o.country, tip: o.tip, kgroup: o.kgroup, account_name: o.account_name, account_id: o.account_id,
         campaign_name: o.campaign_name, campaign_id: o.campaign_id, currency: o.currency };
       byKey[ck] = dims;
       byId[String(o.campaign_id)] = dims;
