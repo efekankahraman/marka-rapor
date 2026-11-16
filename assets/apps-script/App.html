@@ -1475,6 +1475,12 @@
     if (!B.isAdmin) return;
     $('tabStatus').classList.remove('hidden');
     $('tabs').classList.remove('hidden');
+    var TABS = [['web', 'Web'], ['app', 'App'], ['creative', 'Kreatif'], ['targets', 'Hedefler']];
+    $('tabToggles').innerHTML = TABS.map(function (t) { return '<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" data-tt="' + t[0] + '"' + ((B.hiddenTabs || []).indexOf(t[0]) < 0 ? ' checked' : '') + '> ' + t[1] + '</label>'; }).join('');
+    $('tabToggles').onchange = function () {
+      var hid = TABS.map(function (t) { return t[0]; }).filter(function (k) { return !$('tabToggles').querySelector('[data-tt="' + k + '"]').checked; });
+      call('apiSetTabs', JSON.stringify(hid), 'Kaydediliyor…').then(function () { B.hiddenTabs = hid; applyHiddenTabs(); toast('Sekmeler güncellendi'); }).catch(fail);
+    };
     $('lnkConfig').href = B.links.config; $('lnkFolder').href = B.links.folder; $('cfgUrl').value = B.links.config;
     $('guestUrl').value = B.links.guest || '';
     $('btnCopyGuest').onclick = function () { $('guestUrl').select(); document.execCommand('copy'); toast('Kopyalandı'); };
@@ -2217,7 +2223,17 @@
         scales: { y: { beginAtZero: true, title: { display: true, text: 'Adet' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Revenue' } } } }
     });
   }
+  /** Durum > Sekmeler'de kapatılan sekmeleri gizler (B.hiddenTabs). */
+  function applyHiddenTabs() {
+    var hid = B.hiddenTabs || [];
+    ['web', 'app', 'creative', 'targets'].forEach(function (k) {
+      var b = document.querySelector('#tabs button[data-tab="' + k + '"]');
+      if (b) b.classList.toggle('hidden', hid.indexOf(k) >= 0);
+    });
+    if (S.tab && hid.indexOf(S.tab) >= 0) showTab('ads');
+  }
   function showTab(t) {
+    if ((B.hiddenTabs || []).indexOf(t) >= 0) t = 'ads';
     S.tab = t;
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === t); });
     ['ads', 'web', 'app', 'creative', 'cpas', 'targets', 'status'].forEach(function (x) { $('p-' + x).classList.toggle('hidden', x !== t); });
@@ -2276,6 +2292,7 @@
     $('fPreset').onchange = function () { if (this.value) { preset(this.value); this.value = ''; applyFilters(); } };
     $('btnApply').onclick = applyFilters; initCmp(); loadTargets();
     initAds(); initApp(); initWeb(); initCreative(); initCpas(); initTrend(); initStatus(); initFeedback();
+    applyHiddenTabs();
     $('tabs').onclick = function (e) { var t = e.target.closest('button'); if (t) showTab(t.getAttribute('data-tab')); };
     showTab('ads');
     skeleton();

@@ -4,7 +4,11 @@
  * Google Ads: ad seviyesindeki veri (gads_ad); durum = son 7 günde harcama var mı.
  */
 var CR_HDR = ['platform', 'account_id', 'ad_id', 'name', 'status', 'object_type', 'thumb', 'image', 'video_id', 'preview', 'permalink', 'title', 'body', 'created', 'synced', 'catalog', 'texts'];
-function cr_sheet_(ss) { return ss.getSheetByName('Kreatifler') || ss.insertSheet('Kreatifler'); }
+function cr_sheet_(ss) {
+  var sh = ss.getSheetByName('Kreatifler');
+  if (sh) return sh;
+  try { return ss.insertSheet('Kreatifler'); } catch (e) { SpreadsheetApp.flush(); sh = ss.getSheetByName('Kreatifler'); if (sh) return sh; throw e; } // aynı anda başka çalıştırma oluşturduysa
+}
 function creative_syncDaily_(ss) {
   var last = sh_getState_(ss, 'CREATIVE_LAST'), s = sh_settings_(ss), csh = ss.getSheetByName('Kreatifler');
   var fresh = csh && csh.getLastColumn() >= CR_HDR.length && String(csh.getRange(1, CR_HDR.length).getValue()) === CR_HDR[CR_HDR.length - 1];

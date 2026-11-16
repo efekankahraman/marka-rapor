@@ -36,12 +36,21 @@ function adjust_appSync_(ss, from, to) {
   var metrics = app_metrics_(ss, token, apps);
   var ev = app_events_(ss, token, apps), evm = ev.map(function (e) { return e.metric; });
   var excl = String(s.ADJUST_EXCLUDE_COUNTRIES || '').toLowerCase().split(',').map(function (x) { return x.trim(); }).filter(String);
-  var url = 'https://automate.adjust.com/reports-service/report?app_token__in=' + encodeURIComponent(apps.join(',')) +
-    '&date_period=' + from + ':' + to + '&dimensions=' + APP_API_DIMS.join(',') + '&metrics=' + encodeURIComponent(metrics.concat(evm).join(',')) +
-    '&attribution_source=' + encodeURIComponent(s.ADJUST_ATTRIBUTION_SOURCE || 'dynamic') +
-    '&attribution_types=' + encodeURIComponent(s.ADJUST_ATTRIBUTION_TYPE || 'click') +
-    '&cohort_maturity=immature&utc_offset=' + encodeURIComponent(s.ADJUST_UTC_OFFSET || '+03:00');
-  var body = fetchJson_(url, { headers: adjust_headers_(token) });
+  function fetchRange(a, b) {
+    var url = 'https://automate.adjust.com/reports-service/report?app_token__in=' + encodeURIComponent(apps.join(',')) +
+      '&date_period=' + a + ':' + b + '&dimensions=' + APP_API_DIMS.join(',') + '&metrics=' + encodeURIComponent(metrics.concat(evm).join(',')) +
+      '&attribution_source=' + encodeURIComponent(s.ADJUST_ATTRIBUTION_SOURCE || 'dynamic') +
+      '&attribution_types=' + encodeURIComponent(s.ADJUST_ATTRIBUTION_TYPE || 'click') +
+      '&cohort_maturity=immature&utc_offset=' + encodeURIComponent(s.ADJUST_UTC_OFFSET || '+03:00');
+    try { return (fetchJson_(url, { headers: adjust_headers_(token) }).rows || []); }
+    catch (e) {
+      // Büyük hesaplarda yanıt yarıda kesilebiliyor (JSON parse hatası) → aralığı ikiye böl
+      if (!/JSON parse/.test(String(e.message || e)) || a >= b) throw e;
+      var n = Math.round((Date.parse(b) - Date.parse(a)) / 864e5), mid = sh_addDays_(a, Math.floor(n / 2));
+      return fetchRange(a, mid).concat(fetchRange(sh_addDays_(mid, 1), b));
+    }
+  }
+  var body = { rows: fetchRange(from, to) };
   // retention oranları toplanabilir olsun diye "elde tutulan kullanıcı" sayısına çevrilir (oran × install)
   var cols = metrics.map(function (m) { var r = /^retention_rate_(d\d+)$/.exec(m); return r ? 'ret_' + r[1] : m; }).concat(ev.map(function (e) { return e.col; }));
   var rows = [];

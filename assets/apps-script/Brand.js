@@ -89,6 +89,8 @@ var BRAND = {
   BING_PUSH_KEY: '',
 
   // CPAS / Collaborative Ads hesapları (Meta hesap ID'leri): ana rapora girmez, sadece kendi sekmesinde görünür. Yoksa []
+  // Kapalı başlayacak sekmeler: 'web', 'app', 'creative', 'targets'. Sonra Durum > Sekmeler'den açılıp kapatılır
+  HIDDEN_TABS: [],
   CPAS_ACCOUNTS: [],
   // CPAS sekmesinin adı (iş ortağına göre: 'Trendyol CPAS', 'Hepsiburada CPAS'…). CPAS_ACCOUNTS boşsa sekme hiç görünmez
   CPAS_LABEL: 'Trendyol CPAS',

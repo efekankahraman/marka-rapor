@@ -97,6 +97,7 @@ function apiBootstrap(_a, gk) { GK_ = gk || '';
       showCountry: showCountry_(),
       campaignGroup: BRAND.CAMPAIGN_GROUP ? { inLabel: BRAND.CAMPAIGN_GROUP.IN_LABEL, outLabel: BRAND.CAMPAIGN_GROUP.OUT_LABEL, keyword: BRAND.CAMPAIGN_GROUP.KEYWORD, def: BRAND.CAMPAIGN_GROUP.DEFAULT || '' } : null,
       isAdmin: admin,
+      hiddenTabs: String(s.HIDDEN_TABS || '').split(',').map(function (x) { return x.trim(); }).filter(String),
       cpasLabel: BRAND.CPAS_LABEL || 'CPAS',
       startDate: s.START_DATE || '2025-01-01',
       today: sh_today_(),
@@ -330,6 +331,17 @@ function apiSyncNow(_a, gk) { GK_ = gk || '';
     enqueueRecent_(ss, ['meta', 'adjust', 'adjust_ag', 'ga4', 'ga4_ag'].concat(Object.keys(EXT_SOURCES)));
     var r = runSync();
     return r === 'busy' ? 'Senkron zaten çalışıyor; birkaç dakika içinde tamamlanır.' : r;
+  });
+}
+
+/** Durum > Sekmeler: Web / App / Kreatif / Hedefler sekmelerini açar-kapatır (herkes için). */
+function apiSetTabs(json, gk) { GK_ = gk || '';
+  return api_(function () {
+    requireAdmin_();
+    var ok = ['web', 'app', 'creative', 'targets'];
+    var list = (JSON.parse(json || '[]') || []).filter(function (t) { return ok.indexOf(t) >= 0; });
+    sh_setSetting_(cfg_(), 'HIDDEN_TABS', list.join(','));
+    return list;
   });
 }
 

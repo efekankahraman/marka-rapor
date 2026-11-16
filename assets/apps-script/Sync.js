@@ -31,7 +31,7 @@ function runSync() {
     try { probe_status_(ss); } catch (e) {}
     try { shareRoot_(ss); } catch (e) { sh_log_(ss, 'share', 'ERROR', e.message || e); }
     try { manual_sync_(ss); } catch (e) { sh_log_(ss, 'manuel', 'ERROR', e.message || e); }
-    try { creative_syncDaily_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', e.message || e); }
+    if (!tabHidden_(ss, 'creative')) try { creative_syncDaily_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', e.message || e); }
     if (pp.getProperty('CRITEO_DIAG1') !== '1' && pp.getProperty('CRITEO_CREDENTIALS')) { pp.setProperty('CRITEO_DIAG1', '1'); try { criteo_probe_(ss); } catch (e) { sh_log_(ss, 'criteo', 'ERROR', 'teşhis: ' + (e.message || e)); } }
     if (pp.getProperty('EXT_PURGE1') !== '1') { pp.setProperty('EXT_PURGE1', '1'); try { if (ext_purgeStale_(ss)) pp.deleteProperty('CUBE_CUR'); } catch (e) { sh_log_(ss, 'ext', 'ERROR', 'eski hesap temizliği: ' + (e.message || e)); } }
     try { extad_syncAll_(ss); } catch (e) { sh_log_(ss, 'kreatif', 'ERROR', 'diğer mecralar: ' + (e.message || e)); }
@@ -198,6 +198,7 @@ function processQueue_(ss, t0) {
     if (Date.now() - t0 > SYNC_BUDGET_MS) break;
     var it = q[i];
     if (!sourceReady_(it.source)) continue;
+    if (it.source === 'adjust_app' && tabHidden_(ss, 'app')) { setQueueRow_(ss, it, 'done', it.attempts, 'App sekmesi kapalı (atlandı)'); continue; }
     if ((it.source === 'ga4' || it.source === 'ga4_ag') && ga4External_(ss)) { setQueueRow_(ss, it, 'done', it.attempts, 'GA4 köprü script\'i çekiyor (atlandı)'); continue; }
     try {
       var n = runItem_(ss, it, t0);
@@ -224,6 +225,11 @@ function processQueue_(ss, t0) {
     }
   }
   return { done: done, failed: failed, pending: q.length - done };
+}
+
+/** Durum > Sekmeler'de kapatılan sekme mi? (o sekmenin verisi çekilmez) */
+function tabHidden_(ss, tab) {
+  return String(sh_settings_(ss).HIDDEN_TABS || '').split(',').map(function (x) { return x.trim(); }).indexOf(tab) >= 0;
 }
 
 function runItem_(ss, it, t0) {
