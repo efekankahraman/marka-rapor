@@ -1028,7 +1028,12 @@
       viewsSet(r);
       var rid = window.__RID || '', want = rid || lsGet('rpr_view', '');
       var v = VIEWS.filter(function (x) { return x.id === want || (!rid && x.kind === 'mine' && x.name === want); })[0];
-      if (v) { viewApply(v.view, v, true); if (rid) toast('"' + v.name + '" raporu açıldı'); }
+      if (v) {
+        // son kullanılan görünüm kendiliğinden açılırken tarih her zaman varsayılan (son 30 gün) kalır; ?r= linkiyle açılan rapor kendi tarihini kullanır
+        var vv = v.view;
+        if (!rid && vv && vv.state) { vv = JSON.parse(JSON.stringify(vv)); delete vv.state.from; delete vv.state.to; delete vv.state.rel; }
+        viewApply(vv, v, true); if (rid) toast('"' + v.name + '" raporu açıldı');
+      }
       else { drawViewSel(); if (rid) toast('Bu rapor bulunamadı ya da seninle paylaşılmamış.'); }
     }).catch(function () {});
   }
@@ -1357,7 +1362,7 @@
   function loadTrend() {
     setTrendSum();
     if (!$('trendBox').open) return;
-    var p = drillParams(S.trend.brk === 'none' ? 'total' : S.trend.brk, S.trend.grain); delete p.cmp;
+    var p = drillParams(S.trend.brk === 'none' ? 'total' : S.trend.brk, S.trend.grain);
     // metrik filtresi aktifse trend sadece filtreye uyan satırları (ülke/hesap/kampanya…) kapsar
     var mfv = S.ads.mf.length && S.ads.view && PICK_FIELDS[S.ads.level];
     if (mfv) {
@@ -1392,7 +1397,20 @@
     });
     periods.sort();
     var list = order.map(function (k) { return ser[k]; }).sort(function (a, b) { return b.rank - a.rank; });
-    return { periods: periods, all: list, top: list.slice(0, 8), hidden: Math.max(0, list.length - 8), idx: idx, cols: res.columns };
+    // karşılaştırma dönemi: aynı seriler, dönemler sıra numarasıyla eşlenir (1. gün ↔ 1. gün)
+    var cmp = null;
+    if (CMP.on && res.cmp && res.cmp.rows && res.cmp.rows.length) {
+      var cidx = {}; res.cmp.columns.forEach(function (c, i) { cidx[c.k] = i; });
+      var cper = [], cps = {}, cser = {};
+      res.cmp.rows.forEach(function (r) {
+        var per = r[cidx.period]; if (!cps[per]) { cps[per] = 1; cper.push(per); }
+        var key = textCols.map(function (c) { return r[cidx[c.k]]; }).join(' · ') || 'Toplam';
+        (cser[key] || (cser[key] = {}))[per] = r;
+      });
+      cper.sort();
+      cmp = { periods: cper, ser: cser, idx: cidx };
+    }
+    return { periods: periods, all: list, top: list.slice(0, 8), hidden: Math.max(0, list.length - 8), idx: idx, cols: res.columns, cmp: cmp };
   }
   function drawTrend() {
     trCharts.forEach(function (c) { c.destroy(); }); trCharts = [];
@@ -1415,7 +1433,7 @@
           legend: { display: false },
           tooltip: {
             backgroundColor: surf, titleColor: cssVar('--text'), bodyColor: ink2, borderColor: cssVar('--line'), borderWidth: 1, padding: 10, boxWidth: 10, boxHeight: 3,
-            callbacks: { label: function (c) { return ' ' + c.dataset.label + ': ' + (indexed ? NF2.format(c.parsed.y) : fmt(c.parsed.y, c.dataset._u)); } }
+            callbacks: { label: function (c) { return ' ' + c.dataset.label + (c.dataset._cp && c.dataset._cp[c.dataIndex] ? ' (' + c.dataset._cp[c.dataIndex] + ')' : '') + ': ' + (indexed ? NF2.format(c.parsed.y) : fmt(c.parsed.y, c.dataset._u)); } }
           }
         },
         scales: {
@@ -1427,11 +1445,18 @@
     }
     if (S.trend.mode === 'multi') {
       $('trLegend').innerHTML = multiSeries ? d.top.map(function (s, i) { return '<span><span class="sw" style="background:' + colors[i] + '"></span>' + esc(s.label) + '</span>'; }).join('') : '';
+      if (d.cmp) $('trLegend').innerHTML += '<span><span class="sw dash"></span>Kesikli: ' + esc(cmpLabel()) + '</span>';
       el.className = 'charts';
       el.innerHTML = mets.map(function (m, mi) { return '<div class="chartcard"><h4>' + esc(cat[m].l) + '</h4><div class="box"><canvas id="trc' + mi + '"></canvas></div></div>'; }).join('');
       mets.forEach(function (m, mi) {
         var ds = d.top.map(function (s, si) {
           return { label: s.label, _u: cat[m].t, data: d.periods.map(function (p) { var r = s.byP[p]; return r ? r[d.idx[m]] : null; }), borderColor: colors[si], backgroundColor: colors[si], spanGaps: true };
+        });
+        if (d.cmp) d.top.forEach(function (s, si) {
+          var cs = d.cmp.ser[s.key]; if (!cs) return;
+          ds.push({ label: s.label + ' · karşılaştırma', _u: cat[m].t, _cp: d.cmp.periods,
+            data: d.periods.map(function (p, i) { var cp = d.cmp.periods[i], r = cp && cs[cp]; return r ? r[d.cmp.idx[m]] : null; }),
+            borderColor: colors[si], backgroundColor: colors[si], borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: true });
         });
         trCharts.push(new Chart($('trc' + mi), { type: 'line', data: { labels: labels, datasets: ds }, options: baseOpts(cat[m].t, false) }));
       });
@@ -1445,10 +1470,16 @@
           var lab = (multiSeries ? s.label + ' · ' : '') + cat[m].l;
           ds2.push({ label: lab, data: vals.map(function (v) { return v == null || !base ? null : v / base * 100; }), borderColor: cssVar(SERIES[ci]), backgroundColor: cssVar(SERIES[ci]), spanGaps: true });
           legend.push('<span><span class="sw" style="background:' + cssVar(SERIES[ci]) + '"></span>' + esc(lab) + '</span>');
+          if (d.cmp && d.cmp.ser[s.key]) {
+            var cs2 = d.cmp.ser[s.key];
+            ds2.push({ label: lab + ' · karşılaştırma', _cp: d.cmp.periods, data: d.periods.map(function (p, i) { var cp = d.cmp.periods[i], r = cp && cs2[cp], v = r ? r[d.idx[m]] : null; return v == null || !base ? null : v / base * 100; }),
+              borderColor: cssVar(SERIES[ci]), backgroundColor: cssVar(SERIES[ci]), borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, spanGaps: true });
+          }
           ci++;
         });
       });
       $('trLegend').innerHTML = legend.join('');
+      if (d.cmp) $('trLegend').innerHTML += '<span><span class="sw dash"></span>Kesikli: ' + esc(cmpLabel()) + '</span>';
       el.className = 'charts single';
       el.innerHTML = '<div class="chartcard"><h4>Endeks (ilk dönem = 100)</h4><div class="box"><canvas id="trcI"></canvas></div></div>';
       trCharts.push(new Chart($('trcI'), { type: 'line', data: { labels: labels, datasets: ds2 }, options: baseOpts('num', true) }));
@@ -1597,7 +1628,7 @@
   function tsLoad(key) {
     var t = TS[key]; if (!t.api) return;
     var my = ++t.seq;
-    call(t.api, JSON.stringify({ from: S.from, to: S.to, grain: t.grain, dims: [], f: key === 'app' ? appFilt() : undefined }), null, true).then(function (res) {
+    call(t.api, JSON.stringify({ from: S.from, to: S.to, grain: t.grain, dims: [], f: key === 'app' ? appFilt() : undefined, cmp: cmpParam() }), null, true).then(function (res) {
       if (my !== t.seq) return;
       t.res = res; tsDraw(key);
     }).catch(function () {});
@@ -1634,6 +1665,18 @@
       return { label: byK[k].l, data: res.rows.map(function (r) { var v = r[ci]; return v == null ? null : (u === 'pct' ? v * 100 : v); }), u: u,
         borderColor: tsColor(i), backgroundColor: tsColor(i), yAxisID: ax, tension: .25, pointRadius: res.rows.length > 60 ? 0 : 2, spanGaps: true };
     });
+    var cr = key === 'cpas' ? t.cres : res.cmp;
+    if (CMP.on && cr && cr.rows && cr.rows.length) {
+      var cpi = 0; cr.columns.forEach(function (c, i) { if (c.k === 'period') cpi = i; });
+      var crows = cr.rows.slice().sort(function (a, b) { return a[cpi] < b[cpi] ? -1 : a[cpi] > b[cpi] ? 1 : 0; });
+      sel.forEach(function (k, i) {
+        var cj = -1; cr.columns.forEach(function (c, j) { if (c.k === k) cj = j; }); if (cj < 0) return;
+        var u = byK[k].t;
+        ds.push({ label: byK[k].l + ' · karşılaştırma', _cp: crows.map(function (r) { return r[cpi]; }), u: u,
+          data: res.rows.map(function (r, j) { var x = crows[j], v = x ? x[cj] : null; return v == null ? null : (u === 'pct' ? v * 100 : v); }),
+          borderColor: tsColor(i), backgroundColor: tsColor(i), borderDash: [5, 4], borderWidth: 1.5, yAxisID: TS_AX[u] || 'yc', tension: .25, pointRadius: 0, spanGaps: true });
+      });
+    }
     var scales = {}, side = 0;
     ['yc', 'ym', 'yp', 'yx'].forEach(function (ax) {
       if (!used[ax]) return;
@@ -1643,7 +1686,7 @@
       type: 'line',
       data: { labels: res.rows.map(function (r) { return r[pi]; }), datasets: ds },
       options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { var u = ctx.dataset.u; return ctx.dataset.label + ': ' + fmt(u === 'pct' ? ctx.raw / 100 : ctx.raw, u); } } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { var u = ctx.dataset.u; return ctx.dataset.label + (ctx.dataset._cp && ctx.dataset._cp[ctx.dataIndex] ? ' (' + ctx.dataset._cp[ctx.dataIndex] + ')' : '') + ': ' + fmt(u === 'pct' ? ctx.raw / 100 : ctx.raw, u); } } } },
         scales: scales }
     });
   }
@@ -2026,7 +2069,7 @@
     var my = ++cpSeq; CPS.stale = false;
     call('apiCpas', JSON.stringify({ from: S.from, to: S.to, level: CPS.level, grain: CPS.grain, cmp: cmpParam() }), 'CPAS verisi yükleniyor…').then(function (res) {
       if (my !== cpSeq) return;
-      CPS.res = res; CPS.sort = null; CPS.page = 0; TS.cpas.res = res.series; drawCpas();
+      CPS.res = res; CPS.sort = null; CPS.page = 0; TS.cpas.res = res.series; TS.cpas.cres = res.cmp && res.cmp.series; drawCpas();
     }).catch(fail);
     if (tableOnly && CPS.cr) return;
     call('apiCreative', JSON.stringify({ from: S.from, to: S.to, status: 'all', cpas: true }), null, true).then(function (r) {

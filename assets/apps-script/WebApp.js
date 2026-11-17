@@ -129,6 +129,7 @@ function cmp_run_(p, fn) {
   var o2 = fn(p2);
   out.cmp = { from: c.from, to: c.to, columns: o2.columns, rows: o2.rows || [], totals: o2.totals || null };
   if (o2.kpi) out.cmp.kpi = o2.kpi;
+  if (o2.series) out.cmp.series = o2.series;
   return out;
 }
 function apiQuery(paramsJson, gk) { GK_ = gk || '';
